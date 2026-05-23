@@ -10,10 +10,18 @@ A personalized investment tracker for an Enhanced Dollar Cost Averaging workflow
 
 This repository now contains a working local prototype plus a backend service skeleton.
 
+For a deeper walkthrough of the modules, data flow, and architecture, read:
+
+```text
+docs/ARCHITECTURE.md
+```
+
 ## Project Layout
 
 ```text
 .
+|-- docs/
+|   `-- ARCHITECTURE.md                # architecture and onboarding guide
 |-- index.html                         # redirects to the frontend prototype
 |-- frontend/
 |   `-- index.html                     # standalone React dashboard
@@ -21,7 +29,10 @@ This repository now contains a working local prototype plus a backend service sk
 |   |-- requirements.txt
 |   `-- app/
 |       |-- main.py                    # FastAPI routes
+|       |-- database.py                # SQLAlchemy engine/session setup
 |       |-- domain.py                  # core dataclasses
+|       |-- models.py                  # SQLite/PostgreSQL-compatible tables
+|       |-- repositories.py            # persistence adapters
 |       |-- schemas.py                 # API request schemas
 |       `-- services/
 |           |-- csv_import.py          # Fortuneo-like CSV parser
@@ -59,6 +70,20 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+By default, FastAPI stores data in SQLite at:
+
+```text
+data/tracker.sqlite3
+```
+
+Override this with:
+
+```powershell
+$env:INVESTMENT_TRACKER_DATABASE_URL = "sqlite:///C:/path/to/tracker.sqlite3"
+```
+
+The SQLAlchemy models are intentionally PostgreSQL-compatible, so the same repository layer can later point at a PostgreSQL URL.
+
 The API will expose:
 
 ```text
@@ -72,7 +97,7 @@ GET    /api/portfolio
 POST   /api/dca/recommendation
 ```
 
-Current storage is in-memory so the API is easy to iterate on. The next backend step is to add PostgreSQL persistence for users, portfolios, transactions, cached market data, and DCA settings.
+Current storage is persistent SQLite for transactions and latest market prices. The next backend step is to add formal portfolios/accounts, import de-duplication, and migrations.
 
 ## Run Service Tests
 
@@ -89,6 +114,7 @@ Covered behavior:
 - buy/sell cost-basis handling;
 - portfolio value and return calculations;
 - Enhanced DCA amount adjustment.
+- SQLite repository persistence when SQLAlchemy is installed.
 
 ## CSV Import Format
 
