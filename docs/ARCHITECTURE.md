@@ -42,11 +42,15 @@ It can:
 
 - load demo Fortuneo-like CSV data;
 - import a CSV file in the browser;
+- connect to the FastAPI backend at `http://127.0.0.1:8000`;
+- load portfolios, accounts, and portfolio summaries from the API;
+- upload Fortuneo CSV files through the backend import endpoint;
+- save manually edited market prices through the API;
 - compute holdings locally;
 - let the user manually edit current market prices;
 - display total value, invested amount, gains, allocation, and DCA recommendation.
 
-For now, the frontend still computes mostly in-browser. The next frontend step is to make it call the backend API instead.
+If the backend is unavailable, the frontend falls back to demo mode and computes locally. This keeps the prototype useful even before the API is running.
 
 ```text
 index.html
@@ -556,7 +560,7 @@ Important next pieces:
 - import preview before saving;
 - a historical price table, not only latest prices;
 - DCA settings stored in the database;
-- frontend API integration;
+- deeper frontend API integration, especially DCA settings and historical charts;
 - database migrations with Alembic;
 - stronger API response schemas;
 - authentication later, once the local portfolio workflow feels right.

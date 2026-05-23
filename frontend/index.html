@@ -34,7 +34,8 @@
       }
 
       button,
-      input {
+      input,
+      select {
         font: inherit;
       }
 
@@ -60,7 +61,8 @@
       }
 
       input[type="number"],
-      input[type="text"] {
+      input[type="text"],
+      select {
         width: 100%;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -286,6 +288,18 @@
         width: 100%;
       }
 
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 10px;
+        color: var(--muted);
+        font-size: 12px;
+        background: var(--surface);
+      }
+
       @media (max-width: 920px) {
         .metrics,
         .workbench,
@@ -305,7 +319,8 @@
     <div id="root"></div>
 
     <script type="text/babel">
-      const { useMemo, useState } = React;
+      const { useEffect, useMemo, useState } = React;
+      const API_BASE_URL = localStorage.getItem("trackerApiBaseUrl") || "http://127.0.0.1:8000";
 
       const sampleCsv = `Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;Libelle
 15/01/2026;Achat;CW8.PA;3;470,50;1,95;EUR;PEA;Amundi MSCI World
@@ -318,6 +333,14 @@
         "EWLD.PA": 35.4,
         "PX1": 8050,
         "^GSPC": 5260,
+      };
+
+      const emptyApiSummary = {
+        total_value: 0,
+        total_invested: 0,
+        total_gain: 0,
+        total_gain_percent: 0,
+        holdings: [],
       };
 
       function money(value) {
@@ -336,6 +359,20 @@
         if (!value) return 0;
         const normalized = String(value).replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
         return Number(normalized.replace(/[^0-9.-]/g, "")) || 0;
+      }
+
+      function toNumber(value) {
+        const number = Number(value);
+        return Number.isFinite(number) ? number : 0;
+      }
+
+      async function apiRequest(path, options = {}) {
+        const response = await fetch(`${API_BASE_URL}${path}`, options);
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || `API request failed with ${response.status}`);
+        }
+        return response.json();
       }
 
       function splitCsvLine(line, delimiter) {
@@ -424,6 +461,21 @@
         }).sort((a, b) => b.value - a.value);
       }
 
+      function holdingsFromApi(summary) {
+        return (summary.holdings || []).map((holding) => ({
+          ticker: holding.ticker,
+          quantity: toNumber(holding.quantity),
+          cost: toNumber(holding.invested_amount),
+          averageCost: toNumber(holding.average_cost),
+          currentPrice: toNumber(holding.current_price),
+          value: toNumber(holding.market_value),
+          gain: toNumber(holding.unrealized_gain),
+          gainPercent: toNumber(holding.unrealized_gain_percent),
+          allocation: toNumber(holding.allocation_percent),
+          currency: holding.currency || "EUR",
+        }));
+      }
+
       function calculateDca(baseAmount, marketChange, volatility) {
         let multiplier = 1;
         if (marketChange <= -5) multiplier = 1.5;
@@ -490,16 +542,24 @@
       function App() {
         const [transactions, setTransactions] = useState(() => parseCsv(sampleCsv));
         const [prices, setPrices] = useState(initialPrices);
+        const [apiAvailable, setApiAvailable] = useState(false);
+        const [apiLoading, setApiLoading] = useState(false);
+        const [apiSummary, setApiSummary] = useState(emptyApiSummary);
+        const [portfolios, setPortfolios] = useState([]);
+        const [accounts, setAccounts] = useState([]);
+        const [selectedPortfolioId, setSelectedPortfolioId] = useState("default");
         const [baseAmount, setBaseAmount] = useState(1000);
         const [marketChange, setMarketChange] = useState(-2.3);
         const [volatility, setVolatility] = useState(18.5);
-        const [status, setStatus] = useState("Demo data loaded. Import a Fortuneo CSV when ready.");
+        const [status, setStatus] = useState("Demo mode loaded. Start FastAPI on port 8000 to sync with the backend.");
 
-        const holdings = useMemo(() => buildHoldings(transactions, prices), [transactions, prices]);
-        const totalValue = holdings.reduce((sum, holding) => sum + holding.value, 0);
-        const totalInvested = holdings.reduce((sum, holding) => sum + holding.cost, 0);
-        const totalGain = totalValue - totalInvested;
-        const totalGainPercent = totalInvested ? (totalGain / totalInvested) * 100 : 0;
+        const demoHoldings = useMemo(() => buildHoldings(transactions, prices), [transactions, prices]);
+        const apiHoldings = useMemo(() => holdingsFromApi(apiSummary), [apiSummary]);
+        const holdings = apiAvailable ? apiHoldings : demoHoldings;
+        const totalValue = apiAvailable ? toNumber(apiSummary.total_value) : holdings.reduce((sum, holding) => sum + holding.value, 0);
+        const totalInvested = apiAvailable ? toNumber(apiSummary.total_invested) : holdings.reduce((sum, holding) => sum + holding.cost, 0);
+        const totalGain = apiAvailable ? toNumber(apiSummary.total_gain) : totalValue - totalInvested;
+        const totalGainPercent = apiAvailable ? toNumber(apiSummary.total_gain_percent) : totalInvested ? (totalGain / totalInvested) * 100 : 0;
         const dca = calculateDca(baseAmount, marketChange, volatility);
 
         const history = useMemo(() => {
@@ -514,17 +574,104 @@
           });
         }, [totalInvested, totalGain]);
 
+        useEffect(() => {
+          connectBackend();
+        }, []);
+
+        useEffect(() => {
+          if (apiAvailable) {
+            refreshBackendData(selectedPortfolioId);
+          }
+        }, [selectedPortfolioId]);
+
+        async function connectBackend() {
+          setApiLoading(true);
+          try {
+            await apiRequest("/api/health");
+            setApiAvailable(true);
+            await refreshBackendData(selectedPortfolioId);
+            setStatus(`Connected to backend at ${API_BASE_URL}.`);
+          } catch (error) {
+            setApiAvailable(false);
+            setStatus("Backend unavailable. Demo mode is active.");
+          } finally {
+            setApiLoading(false);
+          }
+        }
+
+        async function refreshBackendData(portfolioId = selectedPortfolioId) {
+          setApiLoading(true);
+          try {
+            const [portfolioRows, accountRows, summary] = await Promise.all([
+              apiRequest("/api/portfolios"),
+              apiRequest(`/api/accounts?portfolio_id=${encodeURIComponent(portfolioId)}`),
+              apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
+            ]);
+            setPortfolios(portfolioRows);
+            setAccounts(accountRows);
+            setApiSummary(summary);
+            setPrices((current) => ({
+              ...current,
+              ...(summary.holdings || []).reduce((nextPrices, holding) => {
+                nextPrices[holding.ticker] = toNumber(holding.current_price);
+                return nextPrices;
+              }, {}),
+            }));
+            setApiAvailable(true);
+          } catch (error) {
+            setApiAvailable(false);
+            setStatus(`Backend sync failed: ${error.message}`);
+          } finally {
+            setApiLoading(false);
+          }
+        }
+
         async function importFile(event) {
           const file = event.target.files?.[0];
           if (!file) return;
-          const text = await file.text();
-          const parsed = parseCsv(text);
-          setTransactions(parsed);
-          setStatus(`Imported ${parsed.length} transaction rows from ${file.name}.`);
+          if (apiAvailable) {
+            const formData = new FormData();
+            formData.append("file", file);
+            setApiLoading(true);
+            try {
+              const summary = await apiRequest(`/api/transactions/upload?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+                method: "POST",
+                body: formData,
+              });
+              await refreshBackendData(selectedPortfolioId);
+              setStatus(`Imported ${summary.imported} row(s), skipped ${summary.duplicates} duplicate(s) from ${file.name}.`);
+            } catch (error) {
+              setStatus(`Import failed: ${error.message}`);
+            } finally {
+              setApiLoading(false);
+              event.target.value = "";
+            }
+          } else {
+            const text = await file.text();
+            const parsed = parseCsv(text);
+            setTransactions(parsed);
+            setStatus(`Imported ${parsed.length} transaction rows from ${file.name} in demo mode.`);
+          }
         }
 
         function updatePrice(ticker, value) {
           setPrices((current) => ({ ...current, [ticker]: parseNumber(value) }));
+        }
+
+        async function saveMarketPrice(ticker, value) {
+          updatePrice(ticker, value);
+          if (!apiAvailable) return;
+          try {
+            await apiRequest("/api/market/prices", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ prices: { [ticker]: parseNumber(value) } }),
+            });
+            await refreshBackendData(selectedPortfolioId);
+            setStatus(`Saved market price for ${ticker}.`);
+          } catch (error) {
+            setStatus(`Price update failed: ${error.message}`);
+          }
         }
 
         function simulateMarket() {
@@ -541,7 +688,9 @@
                 <p className="subtitle">Portfolio import, performance tracking, market context, and next contribution sizing.</p>
               </div>
               <div className="actions">
-                <button onClick={() => { setTransactions(parseCsv(sampleCsv)); setStatus("Demo data restored."); }}>Demo data</button>
+                <span className="pill">{apiAvailable ? "Backend connected" : "Demo mode"}</span>
+                <button disabled={apiLoading} onClick={connectBackend}>{apiAvailable ? "Sync API" : "Connect API"}</button>
+                <button onClick={() => { setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setStatus("Demo data restored."); }}>Demo data</button>
                 <button className="primary" onClick={simulateMarket}>Refresh market simulation</button>
               </div>
             </header>
@@ -606,8 +755,9 @@
                               <input
                                 type="text"
                                 aria-label={`${holding.ticker} market price`}
-                                value={prices[holding.ticker] ?? ""}
+                                value={prices[holding.ticker] ?? holding.currentPrice ?? ""}
                                 onChange={(event) => updatePrice(holding.ticker, event.target.value)}
+                                onBlur={(event) => saveMarketPrice(holding.ticker, event.target.value)}
                                 style={{ maxWidth: 110, textAlign: "right" }}
                               />
                             </td>
@@ -625,9 +775,25 @@
               <aside className="stack">
                 <div className="panel">
                   <h2>Fortuneo Import</h2>
+                  <div style={{ marginTop: 12 }}>
+                    <label htmlFor="portfolio">Portfolio</label>
+                    <select
+                      id="portfolio"
+                      value={selectedPortfolioId}
+                      disabled={!apiAvailable || apiLoading}
+                      onChange={(event) => setSelectedPortfolioId(event.target.value)}
+                    >
+                      {(portfolios.length ? portfolios : [{ id: "default", name: "Default Portfolio" }]).map((portfolio) => (
+                        <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {apiAvailable && (
+                    <p className="status">{accounts.length ? `${accounts.length} account(s): ${accounts.map((account) => account.name).join(", ")}` : "No accounts yet for this portfolio."}</p>
+                  )}
                   <div className="drop" style={{ marginTop: 12 }}>
                     <label htmlFor="csv">CSV file</label>
-                    <input className="file" id="csv" type="file" accept=".csv,text/csv" onChange={importFile} />
+                    <input className="file" id="csv" type="file" accept=".csv,text/csv" disabled={apiLoading} onChange={importFile} />
                   </div>
                   <p className="status">{status}</p>
                 </div>

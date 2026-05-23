@@ -52,11 +52,14 @@ Open `index.html` or `frontend/index.html` in a browser.
 The frontend currently runs without a build step. It uses React from a CDN and includes:
 
 - demo Fortuneo-style transactions;
-- CSV upload and local parsing;
+- CSV upload with backend sync when FastAPI is running;
 - editable current prices;
 - portfolio metrics and holdings table;
+- portfolio/account selection from the API;
 - allocation visualization;
 - Enhanced DCA recommendation controls.
+
+If the FastAPI backend is not available at `http://127.0.0.1:8000`, the frontend stays in demo mode and computes locally.
 
 ## Backend Setup
 
