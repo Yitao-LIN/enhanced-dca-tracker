@@ -1,0 +1,5 @@
+Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;Libelle
+15/01/2026;Achat;CW8.PA;3;470,50;1,95;EUR;PEA;Amundi MSCI World
+15/02/2026;Achat;CW8.PA;2;480,10;1,95;EUR;PEA;Amundi MSCI World
+15/03/2026;Achat;EWLD.PA;8;32,60;1,95;EUR;PEA;Amundi World
+20/04/2026;Vente;EWLD.PA;2;34,20;1,95;EUR;PEA;Rebalance
