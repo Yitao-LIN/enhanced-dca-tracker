@@ -66,6 +66,10 @@ Current API routes:
 
 ```text
 GET  /api/health
+GET  /api/portfolios
+POST /api/portfolios
+GET  /api/accounts
+POST /api/accounts
 GET  /api/transactions
 POST /api/transactions
 POST /api/transactions/upload
@@ -134,6 +138,8 @@ This file contains Pydantic models used for validating API request bodies.
 Current schemas:
 
 ```python
+PortfolioIn
+AccountIn
 TransactionIn
 PriceMap
 DcaRequest
@@ -198,9 +204,30 @@ This file defines SQLAlchemy ORM tables.
 Current tables:
 
 ```python
+PortfolioRecord
+AccountRecord
 TransactionRecord
 MarketPriceRecord
 ```
+
+`PortfolioRecord` stores a named portfolio, such as the default personal portfolio or a future strategy-specific portfolio.
+
+Important fields:
+
+- `slug`
+- `name`
+- `base_currency`
+- `created_at`
+
+`AccountRecord` stores brokerage/account containers inside a portfolio, such as `PEA` or `CTO`.
+
+Important fields:
+
+- `portfolio_record_id`
+- `name`
+- `institution`
+- `account_type`
+- `currency`
 
 `TransactionRecord` stores imported or manually added investment transactions.
 
@@ -239,6 +266,8 @@ Repositories are the bridge between database rows and domain objects.
 
 They know how to:
 
+- create or resolve portfolios;
+- create or resolve accounts;
 - save a `Transaction` into a `TransactionRecord`;
 - load database rows back into `Transaction` dataclasses;
 - save or update market prices;
@@ -247,6 +276,11 @@ They know how to:
 Current repository functions:
 
 ```python
+ensure_portfolio()
+create_portfolio()
+list_portfolios()
+ensure_account()
+list_accounts()
 add_transaction()
 add_transactions()
 list_transactions()
@@ -402,17 +436,19 @@ CSV upload:
 
 ```text
 Frontend or API client
-  -> POST /api/transactions/upload
+  -> POST /api/transactions/upload?portfolio_id=default
     -> parse_transactions_csv()
       -> list[Transaction]
         -> add_transactions()
+          -> ensure_portfolio()
+          -> ensure_account()
           -> SQLite transactions table
 ```
 
 Portfolio summary:
 
 ```text
-GET /api/portfolio
+GET /api/portfolio?portfolio_id=default
   -> list_transactions()
     -> SQLite rows converted to Transaction dataclasses
   -> get_market_prices()
@@ -473,7 +509,6 @@ The current architecture is a good foundation, but still early.
 
 Important next pieces:
 
-- real `Portfolio` and `Account` tables;
 - import sessions and duplicate detection;
 - a historical price table, not only latest prices;
 - DCA settings stored in the database;
@@ -482,4 +517,4 @@ Important next pieces:
 - stronger API response schemas;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to add portfolio and account tables, then make transactions belong to an actual portfolio/account instead of the hardcoded `"default"` portfolio id.
+The best next technical step is probably to add import sessions and duplicate detection, so the same Fortuneo CSV can be previewed and re-imported safely.

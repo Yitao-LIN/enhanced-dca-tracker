@@ -88,6 +88,10 @@ The API will expose:
 
 ```text
 GET    /api/health
+GET    /api/portfolios
+POST   /api/portfolios
+GET    /api/accounts
+POST   /api/accounts
 GET    /api/transactions
 POST   /api/transactions
 POST   /api/transactions/upload
@@ -97,7 +101,7 @@ GET    /api/portfolio
 POST   /api/dca/recommendation
 ```
 
-Current storage is persistent SQLite for transactions and latest market prices. The next backend step is to add formal portfolios/accounts, import de-duplication, and migrations.
+Current storage is persistent SQLite for portfolios, accounts, transactions, and latest market prices. The next backend step is import de-duplication and migrations.
 
 ## Run Service Tests
 

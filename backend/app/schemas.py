@@ -6,7 +6,22 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 
+class PortfolioIn(BaseModel):
+    name: str
+    slug: str | None = None
+    base_currency: str = "EUR"
+
+
+class AccountIn(BaseModel):
+    name: str
+    portfolio_id: str = "default"
+    institution: str | None = None
+    account_type: str | None = None
+    currency: str = "EUR"
+
+
 class TransactionIn(BaseModel):
+    portfolio_id: str = "default"
     transaction_date: date
     ticker: str
     transaction_type: str

@@ -21,7 +21,7 @@ class RepositoryTests(unittest.TestCase):
 
     def test_persists_transactions_and_prices(self):
         from app.domain import Transaction, TransactionType
-        from app.repositories import add_transaction, get_market_prices, list_transactions, upsert_market_price
+        from app.repositories import add_transaction, get_market_prices, list_accounts, list_transactions, upsert_market_price
         from app.services.portfolio import summarize_portfolio
 
         with self.Session() as db:
@@ -34,19 +34,61 @@ class RepositoryTests(unittest.TestCase):
                     quantity=Decimal("2"),
                     price=Decimal("100"),
                     fees=Decimal("1.50"),
+                    account="PEA",
                 ),
             )
             upsert_market_price(db, symbol="cw8.pa", close=Decimal("125"), source="manual")
 
             transactions = list_transactions(db)
+            accounts = list_accounts(db)
             prices = get_market_prices(db)
             summary = summarize_portfolio(transactions, prices)
 
         self.assertEqual(len(transactions), 1)
         self.assertEqual(transactions[0].ticker, "CW8.PA")
+        self.assertEqual(len(accounts), 1)
+        self.assertEqual(accounts[0].name, "PEA")
         self.assertEqual(prices["CW8.PA"], Decimal("125.00000000"))
         self.assertEqual(summary.total_value, Decimal("250.00"))
         self.assertEqual(summary.total_gain, Decimal("48.50"))
+
+    def test_keeps_portfolios_isolated(self):
+        from app.domain import Transaction, TransactionType
+        from app.repositories import add_transaction, create_portfolio, list_portfolios, list_transactions
+
+        with self.Session() as db:
+            create_portfolio(db, name="Long Term", slug="long-term")
+            add_transaction(
+                db,
+                Transaction(
+                    transaction_date=date(2026, 1, 15),
+                    ticker="CW8.PA",
+                    transaction_type=TransactionType.BUY,
+                    quantity=Decimal("1"),
+                    price=Decimal("100"),
+                    account="PEA",
+                ),
+                portfolio_id="long-term",
+            )
+            add_transaction(
+                db,
+                Transaction(
+                    transaction_date=date(2026, 1, 15),
+                    ticker="EWLD.PA",
+                    transaction_type=TransactionType.BUY,
+                    quantity=Decimal("1"),
+                    price=Decimal("30"),
+                    account="CTO",
+                ),
+            )
+
+            portfolios = list_portfolios(db)
+            long_term = list_transactions(db, portfolio_id="long-term")
+            default = list_transactions(db)
+
+        self.assertEqual({portfolio.slug for portfolio in portfolios}, {"default", "long-term"})
+        self.assertEqual([transaction.ticker for transaction in long_term], ["CW8.PA"])
+        self.assertEqual([transaction.ticker for transaction in default], ["EWLD.PA"])
 
 
 if __name__ == "__main__":

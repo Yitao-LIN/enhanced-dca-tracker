@@ -3,10 +3,34 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+
+
+class PortfolioRecord(Base):
+    __tablename__ = "portfolios"
+    __table_args__ = (UniqueConstraint("slug", name="uq_portfolios_slug"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    base_currency: Mapped[str] = mapped_column(String(8), default="EUR")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class AccountRecord(Base):
+    __tablename__ = "accounts"
+    __table_args__ = (UniqueConstraint("portfolio_record_id", "name", name="uq_accounts_portfolio_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_record_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    institution: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    account_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), default="EUR")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class TransactionRecord(Base):
