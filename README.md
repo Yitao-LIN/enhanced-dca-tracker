@@ -148,3 +148,7 @@ If volatility is high and the recommendation is already increasing contributions
 3. Add background market fetching for tracked tickers and benchmarks.
 4. Add authentication once local portfolio persistence is working.
 5. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.
+
+## License
+
+MIT License. See `LICENSE`.
