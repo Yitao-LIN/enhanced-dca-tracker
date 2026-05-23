@@ -9,12 +9,12 @@ from app.domain import Transaction, TransactionType
 from app.repositories import (
     DEFAULT_PORTFOLIO_ID,
     add_transaction as save_transaction,
-    add_transactions,
     bootstrap_reference_data,
     count_transactions,
     create_portfolio,
     ensure_account,
     get_market_prices,
+    import_transactions,
     list_accounts as load_accounts,
     list_portfolios as load_portfolios,
     list_transactions as load_transactions,
@@ -115,8 +115,23 @@ async def upload_transactions(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    imported_count = add_transactions(db, imported, portfolio_id=portfolio_id)
-    return {"imported": imported_count, "total": count_transactions(db, portfolio_id=portfolio_id)}
+    summary = import_transactions(
+        db,
+        imported,
+        portfolio_id=portfolio_id,
+        filename=file.filename,
+        file_content=content,
+    )
+    return {
+        "import_session_id": summary.import_session_id,
+        "portfolio_id": summary.portfolio_id,
+        "filename": summary.filename,
+        "file_hash": summary.file_hash,
+        "row_count": summary.row_count,
+        "imported": summary.imported_count,
+        "duplicates": summary.duplicate_count,
+        "total": summary.total_count,
+    }
 
 
 @app.get("/api/transactions")

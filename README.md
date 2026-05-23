@@ -101,7 +101,7 @@ GET    /api/portfolio
 POST   /api/dca/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, and latest market prices. The next backend step is import de-duplication and migrations.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, and latest market prices. CSV imports skip duplicate transactions and return an import summary.
 
 ## Run Service Tests
 
@@ -119,6 +119,7 @@ Covered behavior:
 - portfolio value and return calculations;
 - Enhanced DCA amount adjustment.
 - SQLite repository persistence when SQLAlchemy is installed.
+- duplicate-safe CSV import sessions.
 
 ## CSV Import Format
 
@@ -130,6 +131,23 @@ Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;
 ```
 
 Required fields are date, operation type, and security identifier. Quantity, price, fees, amount, currency, account, and description are optional or inferred when possible.
+
+CSV uploads return an import summary:
+
+```json
+{
+  "import_session_id": 1,
+  "portfolio_id": "default",
+  "filename": "fortuneo.csv",
+  "file_hash": "...",
+  "row_count": 12,
+  "imported": 10,
+  "duplicates": 2,
+  "total": 42
+}
+```
+
+Duplicate detection is based on a transaction fingerprint: date, ticker, transaction type, quantity, price, fees, currency, and account.
 
 ## Enhanced DCA Logic
 

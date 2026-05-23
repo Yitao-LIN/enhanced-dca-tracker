@@ -1,18 +1,40 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+import hashlib
 import re
 
 from sqlalchemy import distinct, select
 from sqlalchemy.orm import Session
 
 from app.domain import MarketSnapshot, Transaction, TransactionType
-from app.models import AccountRecord, MarketPriceRecord, PortfolioRecord, TransactionRecord
+from app.models import (
+    AccountRecord,
+    ImportSessionRecord,
+    MarketPriceRecord,
+    PortfolioRecord,
+    TransactionFingerprintRecord,
+    TransactionRecord,
+)
 
 
 DEFAULT_PORTFOLIO_ID = "default"
 DEFAULT_PORTFOLIO_NAME = "Default Portfolio"
+DECIMAL_FINGERPRINT_PRECISION = Decimal("0.00000001")
+
+
+@dataclass(frozen=True)
+class ImportSummary:
+    import_session_id: int
+    portfolio_id: str
+    filename: str | None
+    file_hash: str
+    row_count: int
+    imported_count: int
+    duplicate_count: int
+    total_count: int
 
 
 def ensure_portfolio(
@@ -118,10 +140,44 @@ def bootstrap_reference_data(db: Session) -> None:
     for portfolio_id, account_name, currency in db.execute(statement):
         ensure_account(db, name=account_name, portfolio_id=portfolio_id or DEFAULT_PORTFOLIO_ID, currency=currency or "EUR")
 
+    for record in db.scalars(select(TransactionRecord).order_by(TransactionRecord.id)):
+        transaction = _transaction_from_record(record)
+        fingerprint = transaction_fingerprint(transaction)
+        existing = db.scalar(
+            select(TransactionFingerprintRecord).where(
+                TransactionFingerprintRecord.portfolio_id == record.portfolio_id,
+                TransactionFingerprintRecord.fingerprint == fingerprint,
+            )
+        )
+        if existing is None:
+            db.add(
+                TransactionFingerprintRecord(
+                    portfolio_id=record.portfolio_id,
+                    fingerprint=fingerprint,
+                    transaction_record_id=record.id,
+                )
+            )
+    db.commit()
+
 
 def add_transaction(db: Session, transaction: Transaction, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> TransactionRecord:
     portfolio = ensure_portfolio(db, portfolio_id)
     ensure_account(db, name=transaction.account, portfolio_id=portfolio.slug, currency=transaction.currency)
+    fingerprint = transaction_fingerprint(transaction)
+    existing = db.scalar(
+        select(TransactionRecord)
+        .join(
+            TransactionFingerprintRecord,
+            TransactionFingerprintRecord.transaction_record_id == TransactionRecord.id,
+        )
+        .where(
+            TransactionFingerprintRecord.portfolio_id == portfolio.slug,
+            TransactionFingerprintRecord.fingerprint == fingerprint,
+        )
+    )
+    if existing is not None:
+        return existing
+
     record = TransactionRecord(
         portfolio_id=portfolio.slug,
         transaction_date=transaction.transaction_date,
@@ -135,18 +191,47 @@ def add_transaction(db: Session, transaction: Transaction, portfolio_id: str = D
         description=transaction.description,
     )
     db.add(record)
+    db.flush()
+    db.add(
+        TransactionFingerprintRecord(
+            portfolio_id=portfolio.slug,
+            fingerprint=fingerprint,
+            transaction_record_id=record.id,
+        )
+    )
     db.commit()
     db.refresh(record)
     return record
 
 
 def add_transactions(db: Session, transactions: list[Transaction], portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> int:
+    return import_transactions(db, transactions, portfolio_id=portfolio_id).imported_count
+
+
+def import_transactions(
+    db: Session,
+    transactions: list[Transaction],
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    filename: str | None = None,
+    file_content: bytes | str | None = None,
+    source: str = "csv",
+) -> ImportSummary:
     portfolio = ensure_portfolio(db, portfolio_id)
     for transaction in transactions:
         ensure_account(db, name=transaction.account, portfolio_id=portfolio.slug, currency=transaction.currency)
 
-    records = [
-        TransactionRecord(
+    fingerprints = [transaction_fingerprint(transaction) for transaction in transactions]
+    existing_fingerprints = _existing_fingerprints(db, portfolio.slug, fingerprints)
+    imported_count = 0
+    duplicate_count = 0
+    seen_in_import: set[str] = set()
+
+    for transaction, fingerprint in zip(transactions, fingerprints):
+        if fingerprint in existing_fingerprints or fingerprint in seen_in_import:
+            duplicate_count += 1
+            continue
+
+        record = TransactionRecord(
             portfolio_id=portfolio.slug,
             transaction_date=transaction.transaction_date,
             ticker=transaction.ticker.upper(),
@@ -158,11 +243,41 @@ def add_transactions(db: Session, transactions: list[Transaction], portfolio_id:
             account=transaction.account,
             description=transaction.description,
         )
-        for transaction in transactions
-    ]
-    db.add_all(records)
+        db.add(record)
+        db.flush()
+        db.add(
+            TransactionFingerprintRecord(
+                portfolio_id=portfolio.slug,
+                fingerprint=fingerprint,
+                transaction_record_id=record.id,
+            )
+        )
+        imported_count += 1
+        seen_in_import.add(fingerprint)
+
+    import_session = ImportSessionRecord(
+        portfolio_id=portfolio.slug,
+        filename=filename,
+        file_hash=_hash_import_payload(file_content, fingerprints),
+        source=source,
+        row_count=len(transactions),
+        imported_count=imported_count,
+        duplicate_count=duplicate_count,
+    )
+    db.add(import_session)
     db.commit()
-    return len(records)
+    db.refresh(import_session)
+
+    return ImportSummary(
+        import_session_id=import_session.id,
+        portfolio_id=portfolio.slug,
+        filename=filename,
+        file_hash=import_session.file_hash,
+        row_count=len(transactions),
+        imported_count=imported_count,
+        duplicate_count=duplicate_count,
+        total_count=count_transactions(db, portfolio_id=portfolio.slug),
+    )
 
 
 def list_transactions(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> list[Transaction]:
@@ -233,6 +348,20 @@ def _transaction_from_record(record: TransactionRecord) -> Transaction:
     )
 
 
+def transaction_fingerprint(transaction: Transaction) -> str:
+    parts = [
+        transaction.transaction_date.isoformat(),
+        transaction.ticker.strip().upper(),
+        transaction.transaction_type.value,
+        _decimal_key(transaction.quantity),
+        _decimal_key(transaction.price),
+        _decimal_key(transaction.fees),
+        transaction.currency.strip().upper(),
+        (transaction.account or "").strip().upper(),
+    ]
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
 def _normalize_slug(value: str | None) -> str:
     raw_value = value or DEFAULT_PORTFOLIO_ID
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", raw_value.strip().lower()).strip("-")
@@ -244,3 +373,27 @@ def _normalize_optional_text(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _decimal_key(value: Decimal) -> str:
+    return str(value.quantize(DECIMAL_FINGERPRINT_PRECISION))
+
+
+def _existing_fingerprints(db: Session, portfolio_id: str, fingerprints: list[str]) -> set[str]:
+    if not fingerprints:
+        return set()
+    statement = select(TransactionFingerprintRecord.fingerprint).where(
+        TransactionFingerprintRecord.portfolio_id == portfolio_id,
+        TransactionFingerprintRecord.fingerprint.in_(fingerprints),
+    )
+    return set(db.scalars(statement))
+
+
+def _hash_import_payload(file_content: bytes | str | None, fingerprints: list[str]) -> str:
+    if isinstance(file_content, str):
+        payload = file_content.encode("utf-8")
+    elif file_content is not None:
+        payload = file_content
+    else:
+        payload = "\n".join(fingerprints).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()

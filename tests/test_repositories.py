@@ -90,6 +90,61 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual([transaction.ticker for transaction in long_term], ["CW8.PA"])
         self.assertEqual([transaction.ticker for transaction in default], ["EWLD.PA"])
 
+    def test_import_skips_duplicate_transactions(self):
+        from app.domain import Transaction, TransactionType
+        from app.repositories import import_transactions, list_transactions
+
+        transaction = Transaction(
+            transaction_date=date(2026, 1, 15),
+            ticker="CW8.PA",
+            transaction_type=TransactionType.BUY,
+            quantity=Decimal("2"),
+            price=Decimal("100"),
+            fees=Decimal("1.50"),
+            account="PEA",
+        )
+
+        with self.Session() as db:
+            first_import = import_transactions(db, [transaction], filename="fortuneo.csv", file_content="first")
+            second_import = import_transactions(db, [transaction], filename="fortuneo.csv", file_content="first")
+            transactions = list_transactions(db)
+
+        self.assertEqual(first_import.imported_count, 1)
+        self.assertEqual(first_import.duplicate_count, 0)
+        self.assertEqual(second_import.imported_count, 0)
+        self.assertEqual(second_import.duplicate_count, 1)
+        self.assertEqual(second_import.total_count, 1)
+        self.assertEqual(len(transactions), 1)
+
+    def test_import_allows_same_security_with_different_quantity(self):
+        from app.domain import Transaction, TransactionType
+        from app.repositories import import_transactions, list_transactions
+
+        base = Transaction(
+            transaction_date=date(2026, 1, 15),
+            ticker="CW8.PA",
+            transaction_type=TransactionType.BUY,
+            quantity=Decimal("2"),
+            price=Decimal("100"),
+            account="PEA",
+        )
+        different_quantity = Transaction(
+            transaction_date=date(2026, 1, 15),
+            ticker="CW8.PA",
+            transaction_type=TransactionType.BUY,
+            quantity=Decimal("3"),
+            price=Decimal("100"),
+            account="PEA",
+        )
+
+        with self.Session() as db:
+            summary = import_transactions(db, [base, different_quantity], filename="fortuneo.csv")
+            transactions = list_transactions(db)
+
+        self.assertEqual(summary.imported_count, 2)
+        self.assertEqual(summary.duplicate_count, 0)
+        self.assertEqual([transaction.quantity for transaction in transactions], [Decimal("2.00000000"), Decimal("3.00000000")])
+
 
 if __name__ == "__main__":
     unittest.main()

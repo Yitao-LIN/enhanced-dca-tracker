@@ -17,3 +17,4 @@ data/
 
 *.log
 global-packages-backup.txt
+.local/

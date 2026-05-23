@@ -50,6 +50,31 @@ class TransactionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class TransactionFingerprintRecord(Base):
+    __tablename__ = "transaction_fingerprints"
+    __table_args__ = (UniqueConstraint("portfolio_id", "fingerprint", name="uq_transaction_fingerprint"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[str] = mapped_column(String(64), index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    transaction_record_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ImportSessionRecord(Base):
+    __tablename__ = "import_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[str] = mapped_column(String(64), index=True)
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    file_hash: Mapped[str] = mapped_column(String(64), index=True)
+    source: Mapped[str] = mapped_column(String(32), default="csv")
+    row_count: Mapped[int] = mapped_column(Integer, default=0)
+    imported_count: Mapped[int] = mapped_column(Integer, default=0)
+    duplicate_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class MarketPriceRecord(Base):
     __tablename__ = "market_prices"
     __table_args__ = (UniqueConstraint("symbol", name="uq_market_prices_symbol"),)

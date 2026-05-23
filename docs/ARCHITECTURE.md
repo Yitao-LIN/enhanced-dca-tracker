@@ -207,6 +207,8 @@ Current tables:
 PortfolioRecord
 AccountRecord
 TransactionRecord
+TransactionFingerprintRecord
+ImportSessionRecord
 MarketPriceRecord
 ```
 
@@ -243,6 +245,26 @@ Important fields:
 - `account`
 - `description`
 
+`TransactionFingerprintRecord` stores a stable hash for each transaction inside a portfolio. It is used to skip duplicates during CSV imports without adding new columns to the existing `transactions` table.
+
+Important fields:
+
+- `portfolio_id`
+- `fingerprint`
+- `transaction_record_id`
+
+`ImportSessionRecord` stores one row for each CSV import attempt.
+
+Important fields:
+
+- `portfolio_id`
+- `filename`
+- `file_hash`
+- `row_count`
+- `imported_count`
+- `duplicate_count`
+- `created_at`
+
 `MarketPriceRecord` stores the latest known market price for each symbol.
 
 Important fields:
@@ -269,6 +291,9 @@ They know how to:
 - create or resolve portfolios;
 - create or resolve accounts;
 - save a `Transaction` into a `TransactionRecord`;
+- create transaction fingerprints;
+- save import sessions;
+- skip duplicate transaction imports;
 - load database rows back into `Transaction` dataclasses;
 - save or update market prices;
 - return current prices as a `{ticker: price}` dictionary.
@@ -283,6 +308,7 @@ ensure_account()
 list_accounts()
 add_transaction()
 add_transactions()
+import_transactions()
 list_transactions()
 count_transactions()
 upsert_market_price()
@@ -439,10 +465,28 @@ Frontend or API client
   -> POST /api/transactions/upload?portfolio_id=default
     -> parse_transactions_csv()
       -> list[Transaction]
-        -> add_transactions()
+        -> import_transactions()
           -> ensure_portfolio()
           -> ensure_account()
+          -> transaction_fingerprint()
+          -> skip duplicates already in SQLite
+          -> ImportSessionRecord
           -> SQLite transactions table
+```
+
+Upload responses include an import summary:
+
+```json
+{
+  "import_session_id": 1,
+  "portfolio_id": "default",
+  "filename": "fortuneo.csv",
+  "file_hash": "...",
+  "row_count": 12,
+  "imported": 10,
+  "duplicates": 2,
+  "total": 42
+}
 ```
 
 Portfolio summary:
@@ -509,7 +553,7 @@ The current architecture is a good foundation, but still early.
 
 Important next pieces:
 
-- import sessions and duplicate detection;
+- import preview before saving;
 - a historical price table, not only latest prices;
 - DCA settings stored in the database;
 - frontend API integration;
@@ -517,4 +561,4 @@ Important next pieces:
 - stronger API response schemas;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to add import sessions and duplicate detection, so the same Fortuneo CSV can be previewed and re-imported safely.
+The best next technical step is probably to connect the frontend to the backend API, now that CSV imports are safer to repeat.
