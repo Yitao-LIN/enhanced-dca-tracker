@@ -63,6 +63,29 @@ OK
 
 If a test is skipped, it usually means the command is not using the project `.venv` or a dependency such as SQLAlchemy is missing.
 
+## Windows Test Runner
+
+Run this from the repository root:
+
+```powershell
+.\run_tests.bat
+```
+
+Purpose:
+
+- run the automated unit and repository tests;
+- run the Python compile check;
+- run a fresh SQLite Alembic migration smoke test;
+- print the important paths, environment variables, commands, and migration inspection output for debugging.
+
+Expected final output:
+
+```text
+[PASS] All automated checks passed.
+```
+
+This script intentionally covers stable automated checks. Manual API and frontend smoke tests are still listed below, and the script should be updated when those checks become safe to automate.
+
 ## Compile Check
 
 Run:
