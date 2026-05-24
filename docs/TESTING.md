@@ -1,0 +1,323 @@
+# Testing Guide
+
+This document explains the tests and manual checks used by this project. Update it whenever a new test, smoke check, or required verification step is added.
+
+The goal is not only to know which command to run, but also why the check exists and what a healthy result looks like.
+
+## Test Environment
+
+Most commands assume you are at the repository root:
+
+```powershell
+cd "X:\My Finance\Tracker"
+```
+
+Use the backend virtual environment:
+
+```powershell
+.\backend\.venv\Scripts\Activate.ps1
+```
+
+For Python imports, the backend package path must be available:
+
+```powershell
+$env:PYTHONPATH = "backend"
+```
+
+## Automated Unit And Repository Tests
+
+Run:
+
+```powershell
+$env:PYTHONPATH = "backend"
+.\backend\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Purpose:
+
+- verify Fortuneo-style CSV parsing;
+- verify portfolio math and cost-basis behavior;
+- verify Enhanced DCA recommendation logic;
+- verify SQLAlchemy repository persistence;
+- verify portfolio/account isolation;
+- verify duplicate-safe CSV imports.
+
+Expected output:
+
+```text
+test_import_allows_same_security_with_different_quantity ... ok
+test_import_skips_duplicate_transactions ... ok
+test_keeps_portfolios_isolated ... ok
+test_persists_transactions_and_prices ... ok
+test_parse_fortuneo_style_csv ... ok
+test_enhanced_dca_increases_on_market_drawdown ... ok
+test_build_holdings_reduces_cost_basis_on_sell ... ok
+test_summarize_portfolio_prices_holdings ... ok
+
+Ran 8 tests
+
+OK
+```
+
+If a test is skipped, it usually means the command is not using the project `.venv` or a dependency such as SQLAlchemy is missing.
+
+## Compile Check
+
+Run:
+
+```powershell
+$env:PYTHONPATH = "backend"
+.\backend\.venv\Scripts\python.exe -m compileall backend\app backend\alembic tests
+```
+
+Purpose:
+
+- catch Python syntax errors;
+- catch malformed migration files;
+- verify modules can be imported and compiled.
+
+Expected output:
+
+```text
+Listing 'backend\app'...
+Listing 'backend\alembic'...
+Listing 'tests'...
+```
+
+There should be no traceback or `SyntaxError`.
+
+After running compile checks, Python may create `__pycache__` directories. They are ignored by Git, but you can remove them with:
+
+```powershell
+Remove-Item -LiteralPath 'X:\My Finance\Tracker\backend\app\__pycache__','X:\My Finance\Tracker\backend\app\services\__pycache__','X:\My Finance\Tracker\backend\alembic\__pycache__','X:\My Finance\Tracker\backend\alembic\versions\__pycache__','X:\My Finance\Tracker\tests\__pycache__' -Recurse -Force
+```
+
+## Alembic Migration Smoke Test
+
+Run this with a temporary SQLite database so your real local database is not touched:
+
+```powershell
+$db = "X:\My Finance\Tracker\.local\migration-test.sqlite3"
+if (Test-Path $db) { Remove-Item -LiteralPath $db -Force }
+
+$env:INVESTMENT_TRACKER_DATABASE_URL = "sqlite:///X:/My Finance/Tracker/.local/migration-test.sqlite3"
+
+.\backend\.venv\Scripts\alembic.exe -c backend\alembic.ini upgrade head
+```
+
+Purpose:
+
+- verify Alembic can create a fresh database from migrations;
+- verify `backend/alembic.ini`, `backend/alembic/env.py`, and migration files are wired correctly;
+- verify the initial schema can be recreated from versioned migration history.
+
+Expected output:
+
+```text
+INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
+INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 20260523_0001, Initial schema.
+```
+
+Then inspect the tables:
+
+```powershell
+@'
+import sqlite3
+
+con = sqlite3.connect(r".local\migration-test.sqlite3")
+rows = con.execute("select name from sqlite_master where type='table' order by name")
+print([row[0] for row in rows])
+'@ | .\backend\.venv\Scripts\python.exe
+```
+
+Expected output includes:
+
+```text
+accounts
+alembic_version
+import_sessions
+market_prices
+portfolios
+transaction_fingerprints
+transactions
+```
+
+The `alembic_version` table is important because it proves Alembic has marked the database with the migration revision it applied.
+
+## App Startup Migration Smoke Test
+
+Run:
+
+```powershell
+$env:INVESTMENT_TRACKER_DATABASE_URL = "sqlite:///X:/My Finance/Tracker/.local/startup-test.sqlite3"
+cd "X:\My Finance\Tracker\backend"
+.\.venv\Scripts\uvicorn.exe app.main:app --reload
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/api/health
+```
+
+Purpose:
+
+- verify FastAPI startup calls database initialization;
+- verify startup migrations do not block the app from serving requests;
+- verify a new SQLite database can be created through normal app startup.
+
+Expected API response:
+
+```json
+{"status":"ok"}
+```
+
+Expected terminal behavior:
+
+- Uvicorn starts normally;
+- no migration traceback appears;
+- `/api/health` returns `200 OK`.
+
+## Duplicate-Safe CSV Import Smoke Test
+
+Start the backend:
+
+```powershell
+cd "X:\My Finance\Tracker\backend"
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload
+```
+
+From another terminal, upload the sample CSV:
+
+```powershell
+curl.exe -F "file=@X:\My Finance\Tracker\samples\fortuneo_transactions_sample.csv" "http://127.0.0.1:8000/api/transactions/upload?portfolio_id=default"
+```
+
+Purpose:
+
+- verify the upload endpoint accepts a Fortuneo-style CSV;
+- verify transactions are persisted;
+- verify import sessions are recorded;
+- verify duplicates are skipped on repeated import.
+
+Expected first upload:
+
+```json
+{
+  "row_count": 4,
+  "imported": 4,
+  "duplicates": 0,
+  "total": 4
+}
+```
+
+Run the same command again.
+
+Expected second upload:
+
+```json
+{
+  "row_count": 4,
+  "imported": 0,
+  "duplicates": 4,
+  "total": 4
+}
+```
+
+The important signal is that `total` stays at `4`, not `8`.
+
+## Frontend Backend Connection Smoke Test
+
+Start the backend:
+
+```powershell
+cd "X:\My Finance\Tracker\backend"
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload
+```
+
+Serve the frontend from the repository root:
+
+```powershell
+cd "X:\My Finance\Tracker"
+python -m http.server 8001 --bind 127.0.0.1
+```
+
+Open:
+
+```text
+http://127.0.0.1:8001/frontend/index.html
+```
+
+Purpose:
+
+- verify the browser can load the standalone frontend;
+- verify CORS allows the frontend to talk to the backend;
+- verify the page can connect to `/api/health`, `/api/portfolios`, `/api/accounts`, and `/api/portfolio`;
+- verify CSV upload uses the backend when connected.
+
+Expected page behavior:
+
+- top-right status shows `Backend connected`;
+- import panel shows `Default Portfolio`;
+- CSV upload status says something like:
+
+```text
+Imported 4 row(s), skipped 0 duplicate(s) from fortuneo_transactions_sample.csv.
+```
+
+If the page says:
+
+```text
+Imported 4 transaction rows from fortuneo_transactions_sample.csv in demo mode.
+```
+
+then the frontend is not connected to the backend. Check that FastAPI is running at `http://127.0.0.1:8000`, then click `Connect API`.
+
+## When To Run Which Test
+
+Run automated tests after any backend logic change:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Run compile checks after touching Python modules or Alembic files:
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m compileall backend\app backend\alembic tests
+```
+
+Run Alembic migration smoke tests after changing:
+
+- SQLAlchemy models;
+- migration files;
+- database initialization logic;
+- `backend/alembic.ini`;
+- `backend/alembic/env.py`.
+
+Run duplicate-safe import smoke tests after changing:
+
+- CSV parser;
+- transaction repository;
+- import endpoint;
+- transaction fingerprint logic.
+
+Run frontend backend connection smoke tests after changing:
+
+- `frontend/index.html`;
+- backend CORS config;
+- API route payloads used by the frontend.
+
+## Current Baseline
+
+As of this guide, the healthy baseline is:
+
+```text
+Automated tests: 8 tests, OK
+Alembic fresh SQLite migration: OK
+Duplicate CSV upload: first import saves rows, second import skips duplicates
+Frontend: demo fallback works, backend-connected mode works when FastAPI is running
+```

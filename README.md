@@ -16,16 +16,25 @@ For a deeper walkthrough of the modules, data flow, and architecture, read:
 docs/ARCHITECTURE.md
 ```
 
+For test commands, manual smoke checks, and expected outputs, read:
+
+```text
+docs/TESTING.md
+```
+
 ## Project Layout
 
 ```text
 .
 |-- docs/
-|   `-- ARCHITECTURE.md                # architecture and onboarding guide
+|   |-- ARCHITECTURE.md                # architecture and onboarding guide
+|   `-- TESTING.md                     # test guide and expected outputs
 |-- index.html                         # redirects to the frontend prototype
 |-- frontend/
 |   `-- index.html                     # standalone React dashboard
 |-- backend/
+|   |-- alembic.ini                    # migration config
+|   |-- alembic/                       # database migrations
 |   |-- requirements.txt
 |   `-- app/
 |       |-- main.py                    # FastAPI routes
@@ -87,6 +96,26 @@ $env:INVESTMENT_TRACKER_DATABASE_URL = "sqlite:///C:/path/to/tracker.sqlite3"
 
 The SQLAlchemy models are intentionally PostgreSQL-compatible, so the same repository layer can later point at a PostgreSQL URL.
 
+## Database Migrations
+
+The backend uses Alembic for schema migrations. FastAPI runs migrations on startup when Alembic is installed.
+
+Run migrations manually from `backend/` with:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+alembic upgrade head
+```
+
+Or from the repository root:
+
+```powershell
+.\backend\.venv\Scripts\Activate.ps1
+alembic -c backend/alembic.ini upgrade head
+```
+
+Existing local SQLite databases created before Alembic are automatically baselined on first startup.
+
 The API will expose:
 
 ```text
@@ -108,7 +137,7 @@ Current storage is persistent SQLite for portfolios, accounts, transactions, imp
 
 ## Run Service Tests
 
-The service tests do not require FastAPI or network access.
+The service tests do not require FastAPI or network access. For full testing guidance, see `docs/TESTING.md`.
 
 ```powershell
 $env:PYTHONPATH = "backend"
@@ -168,9 +197,9 @@ If volatility is high and the recommendation is already increasing contributions
 
 ## Next Build Steps
 
-1. Add persistent PostgreSQL models and migrations.
-2. Connect the frontend to the FastAPI routes.
-3. Add background market fetching for tracked tickers and benchmarks.
+1. Add historical market prices for tracked tickers and benchmarks.
+2. Persist DCA settings per portfolio.
+3. Add richer analytics for allocation drift, contributions, and benchmark comparison.
 4. Add authentication once local portfolio persistence is working.
 5. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.
 

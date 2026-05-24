@@ -91,15 +91,15 @@ db: Session = Depends(get_db)
 
 FastAPI creates the session for the request, passes it into the route, and closes it afterward.
 
-The app creates database tables on startup:
+The app initializes the database on startup:
 
 ```python
 @app.on_event("startup")
 def on_startup() -> None:
-    create_db_and_tables()
+    initialize_database()
 ```
 
-This is simple and useful for the early MVP. Later, once the schema gets more serious, this should be replaced by Alembic migrations.
+`initialize_database()` runs Alembic migrations when Alembic is installed. If it finds an older local SQLite database that was created with SQLAlchemy `create_all()`, it creates any missing tables and stamps the database at the current migration revision so future schema changes can move through Alembic.
 
 ## Domain Models
 
@@ -175,7 +175,7 @@ It defines:
 Base
 engine
 SessionLocal
-create_db_and_tables()
+initialize_database()
 get_db()
 ```
 
@@ -195,6 +195,34 @@ Later this same layer can point to PostgreSQL:
 
 ```text
 postgresql://user:password@localhost:5432/investment_tracker
+```
+
+## Database Migrations
+
+```text
+backend/alembic.ini
+backend/alembic/
+```
+
+Alembic owns schema changes. The current initial migration creates:
+
+- portfolios;
+- accounts;
+- transactions;
+- transaction fingerprints;
+- import sessions;
+- latest market prices.
+
+Run migrations manually from `backend/`:
+
+```powershell
+alembic upgrade head
+```
+
+Or from the repository root:
+
+```powershell
+alembic -c backend/alembic.ini upgrade head
 ```
 
 ## Database Tables
@@ -561,8 +589,7 @@ Important next pieces:
 - a historical price table, not only latest prices;
 - DCA settings stored in the database;
 - deeper frontend API integration, especially DCA settings and historical charts;
-- database migrations with Alembic;
 - stronger API response schemas;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to connect the frontend to the backend API, now that CSV imports are safer to repeat.
+The best next technical step is probably to add historical market prices, so charts can be based on stored market data instead of demo interpolation.

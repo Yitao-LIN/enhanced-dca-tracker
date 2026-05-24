@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, create_db_and_tables, get_db
+from app.database import SessionLocal, get_db, initialize_database
 from app.domain import Transaction, TransactionType
 from app.repositories import (
     DEFAULT_PORTFOLIO_ID,
@@ -47,7 +47,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup() -> None:
-    create_db_and_tables()
+    initialize_database()
     with SessionLocal() as db:
         bootstrap_reference_data(db)
 
