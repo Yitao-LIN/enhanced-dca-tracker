@@ -37,6 +37,23 @@ class PriceMap(BaseModel):
     prices: dict[str, Decimal]
 
 
+class MarketPriceHistoryPointIn(BaseModel):
+    symbol: str
+    price_date: date
+    close: Decimal
+    open: Decimal | None = None
+    high: Decimal | None = None
+    low: Decimal | None = None
+    adjusted_close: Decimal | None = None
+    volume: int | None = None
+    currency: str = "EUR"
+    source: str = "manual"
+
+
+class MarketPriceHistoryIn(BaseModel):
+    prices: list[MarketPriceHistoryPointIn]
+
+
 class DcaRequest(BaseModel):
     base_amount: Decimal
     market_change_percent: Decimal

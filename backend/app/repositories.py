@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 import hashlib
 import re
@@ -14,6 +14,7 @@ from app.models import (
     AccountRecord,
     ImportSessionRecord,
     MarketPriceRecord,
+    MarketPriceHistoryRecord,
     PortfolioRecord,
     TransactionFingerprintRecord,
     TransactionRecord,
@@ -35,6 +36,20 @@ class ImportSummary:
     imported_count: int
     duplicate_count: int
     total_count: int
+
+
+@dataclass(frozen=True)
+class MarketPriceHistoryPoint:
+    symbol: str
+    price_date: date
+    close: Decimal
+    open: Decimal | None = None
+    high: Decimal | None = None
+    low: Decimal | None = None
+    adjusted_close: Decimal | None = None
+    volume: int | None = None
+    currency: str = "EUR"
+    source: str = "manual"
 
 
 def ensure_portfolio(
@@ -316,12 +331,84 @@ def upsert_market_price(
     record.as_of = as_of or datetime.now(timezone.utc)
     db.commit()
     db.refresh(record)
+    upsert_market_price_history(
+        db,
+        MarketPriceHistoryPoint(
+            symbol=normalized_symbol,
+            price_date=(as_of or datetime.now(timezone.utc)).date(),
+            close=close,
+            currency=currency,
+            source=source,
+        ),
+        commit=True,
+    )
     return record
 
 
 def get_market_prices(db: Session) -> dict[str, Decimal]:
     statement = select(MarketPriceRecord).order_by(MarketPriceRecord.symbol)
     return {record.symbol: record.close for record in db.scalars(statement)}
+
+
+def upsert_market_price_history(
+    db: Session,
+    point: MarketPriceHistoryPoint,
+    commit: bool = True,
+) -> MarketPriceHistoryRecord:
+    normalized_symbol = point.symbol.upper()
+    normalized_source = point.source.lower()
+    statement = select(MarketPriceHistoryRecord).where(
+        MarketPriceHistoryRecord.symbol == normalized_symbol,
+        MarketPriceHistoryRecord.price_date == point.price_date,
+        MarketPriceHistoryRecord.source == normalized_source,
+    )
+    record = db.scalar(statement)
+    if record is None:
+        record = MarketPriceHistoryRecord(
+            symbol=normalized_symbol,
+            price_date=point.price_date,
+            close=point.close,
+        )
+        db.add(record)
+
+    record.open = point.open
+    record.high = point.high
+    record.low = point.low
+    record.close = point.close
+    record.adjusted_close = point.adjusted_close
+    record.volume = point.volume
+    record.currency = point.currency.upper()
+    record.source = normalized_source
+
+    if commit:
+        db.commit()
+        db.refresh(record)
+    return record
+
+
+def upsert_market_price_history_many(db: Session, points: list[MarketPriceHistoryPoint]) -> int:
+    for point in points:
+        upsert_market_price_history(db, point, commit=False)
+    db.commit()
+    return len(points)
+
+
+def list_market_price_history(
+    db: Session,
+    symbol: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    source: str | None = None,
+) -> list[MarketPriceHistoryRecord]:
+    statement = select(MarketPriceHistoryRecord).where(MarketPriceHistoryRecord.symbol == symbol.upper())
+    if start_date is not None:
+        statement = statement.where(MarketPriceHistoryRecord.price_date >= start_date)
+    if end_date is not None:
+        statement = statement.where(MarketPriceHistoryRecord.price_date <= end_date)
+    if source is not None:
+        statement = statement.where(MarketPriceHistoryRecord.source == source.lower())
+    statement = statement.order_by(MarketPriceHistoryRecord.price_date, MarketPriceHistoryRecord.source)
+    return list(db.scalars(statement))
 
 
 def market_snapshot_from_record(record: MarketPriceRecord) -> MarketSnapshot:

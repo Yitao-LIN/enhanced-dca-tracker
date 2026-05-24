@@ -145,6 +145,67 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(summary.duplicate_count, 0)
         self.assertEqual([transaction.quantity for transaction in transactions], [Decimal("2.00000000"), Decimal("3.00000000")])
 
+    def test_market_price_history_upserts_and_filters_ranges(self):
+        from app.repositories import (
+            MarketPriceHistoryPoint,
+            list_market_price_history,
+            upsert_market_price_history_many,
+        )
+
+        with self.Session() as db:
+            updated = upsert_market_price_history_many(
+                db,
+                [
+                    MarketPriceHistoryPoint(
+                        symbol="cw8.pa",
+                        price_date=date(2026, 1, 15),
+                        close=Decimal("470.50"),
+                        currency="EUR",
+                        source="manual",
+                    ),
+                    MarketPriceHistoryPoint(
+                        symbol="CW8.PA",
+                        price_date=date(2026, 1, 16),
+                        close=Decimal("472.10"),
+                        currency="EUR",
+                        source="manual",
+                    ),
+                    MarketPriceHistoryPoint(
+                        symbol="CW8.PA",
+                        price_date=date(2026, 1, 16),
+                        close=Decimal("471.80"),
+                        currency="EUR",
+                        source="yfinance",
+                    ),
+                ],
+            )
+            upsert_market_price_history_many(
+                db,
+                [
+                    MarketPriceHistoryPoint(
+                        symbol="CW8.PA",
+                        price_date=date(2026, 1, 16),
+                        close=Decimal("473.00"),
+                        currency="EUR",
+                        source="manual",
+                    )
+                ],
+            )
+
+            manual_history = list_market_price_history(
+                db,
+                symbol="CW8.PA",
+                start_date=date(2026, 1, 16),
+                end_date=date(2026, 1, 16),
+                source="manual",
+            )
+            full_history = list_market_price_history(db, symbol="CW8.PA")
+
+        self.assertEqual(updated, 3)
+        self.assertEqual(len(manual_history), 1)
+        self.assertEqual(manual_history[0].close, Decimal("473.00000000"))
+        self.assertEqual([record.price_date for record in full_history], [date(2026, 1, 15), date(2026, 1, 16), date(2026, 1, 16)])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,6 +41,7 @@ Purpose:
 - verify SQLAlchemy repository persistence;
 - verify portfolio/account isolation;
 - verify duplicate-safe CSV imports.
+- verify historical market price upsert and range filtering.
 
 Expected output:
 
@@ -53,8 +54,9 @@ test_parse_fortuneo_style_csv ... ok
 test_enhanced_dca_increases_on_market_drawdown ... ok
 test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_summarize_portfolio_prices_holdings ... ok
+test_market_price_history_upserts_and_filters_ranges ... ok
 
-Ran 8 tests
+Ran 9 tests
 
 OK
 ```
@@ -137,6 +139,7 @@ Expected output includes:
 accounts
 alembic_version
 import_sessions
+market_price_history
 market_prices
 portfolios
 transaction_fingerprints
@@ -228,6 +231,84 @@ Expected second upload:
 
 The important signal is that `total` stays at `4`, not `8`.
 
+## Historical Market Price Smoke Test
+
+Start the backend:
+
+```powershell
+cd "X:\My Finance\Tracker\backend"
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload
+```
+
+From another terminal, write two history points:
+
+```powershell
+$payload = @{
+  prices = @(
+    @{
+      symbol = "CW8.PA"
+      price_date = "2026-01-15"
+      close = 470.50
+      currency = "EUR"
+      source = "manual"
+    },
+    @{
+      symbol = "CW8.PA"
+      price_date = "2026-01-16"
+      close = 472.10
+      currency = "EUR"
+      source = "manual"
+    }
+  )
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method Put `
+  -Uri "http://127.0.0.1:8000/api/market/history" `
+  -ContentType "application/json" `
+  -Body $payload
+```
+
+Purpose:
+
+- verify the API can store historical price points;
+- verify symbol normalization;
+- verify the table can be read by date range.
+
+Expected write response:
+
+```json
+{"updated":2}
+```
+
+Read the history back:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/api/market/history/CW8.PA?start_date=2026-01-15&end_date=2026-01-16"
+```
+
+Expected response contains two rows ordered by date:
+
+```json
+[
+  {
+    "symbol": "CW8.PA",
+    "price_date": "2026-01-15",
+    "close": 470.5,
+    "currency": "EUR",
+    "source": "manual"
+  },
+  {
+    "symbol": "CW8.PA",
+    "price_date": "2026-01-16",
+    "close": 472.1,
+    "currency": "EUR",
+    "source": "manual"
+  }
+]
+```
+
 ## Frontend Backend Connection Smoke Test
 
 Start the backend:
@@ -305,6 +386,13 @@ Run duplicate-safe import smoke tests after changing:
 - import endpoint;
 - transaction fingerprint logic.
 
+Run historical market price smoke tests after changing:
+
+- `MarketPriceHistoryRecord`;
+- market history repository functions;
+- `/api/market/history` endpoints;
+- migrations that touch market price history.
+
 Run frontend backend connection smoke tests after changing:
 
 - `frontend/index.html`;
@@ -316,8 +404,9 @@ Run frontend backend connection smoke tests after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 8 tests, OK
+Automated tests: 9 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
+Historical market prices: range write/read works
 Frontend: demo fallback works, backend-connected mode works when FastAPI is running
 ```

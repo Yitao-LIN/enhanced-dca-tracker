@@ -212,6 +212,7 @@ Alembic owns schema changes. The current initial migration creates:
 - transaction fingerprints;
 - import sessions;
 - latest market prices.
+- historical market prices.
 
 Run migrations manually from `backend/`:
 
@@ -242,6 +243,7 @@ TransactionRecord
 TransactionFingerprintRecord
 ImportSessionRecord
 MarketPriceRecord
+MarketPriceHistoryRecord
 ```
 
 `PortfolioRecord` stores a named portfolio, such as the default personal portfolio or a future strategy-specific portfolio.
@@ -308,7 +310,22 @@ Important fields:
 - `as_of`
 - `source`
 
-Right now, the app stores one latest price per symbol. Later, it should also store historical market prices.
+`MarketPriceHistoryRecord` stores one historical price point per symbol, date, and source.
+
+Important fields:
+
+- `symbol`
+- `price_date`
+- `open`
+- `high`
+- `low`
+- `close`
+- `adjusted_close`
+- `volume`
+- `currency`
+- `source`
+
+The latest-price table is useful for current portfolio valuation. The history table is the foundation for real performance charts, benchmark comparisons, and backfills from providers such as Yahoo Finance.
 
 ## Repositories
 
@@ -328,6 +345,8 @@ They know how to:
 - skip duplicate transaction imports;
 - load database rows back into `Transaction` dataclasses;
 - save or update market prices;
+- save or update historical market prices;
+- read historical market prices by symbol, date range, and source;
 - return current prices as a `{ticker: price}` dictionary.
 
 Current repository functions:
@@ -345,6 +364,8 @@ list_transactions()
 count_transactions()
 upsert_market_price()
 get_market_prices()
+upsert_market_price_history_many()
+list_market_price_history()
 ```
 
 This keeps SQLAlchemy code out of `main.py` and out of the business calculation services.
@@ -538,7 +559,25 @@ Manual price update:
 ```text
 PUT /api/market/prices
   -> upsert_market_price()
+    -> upsert_market_price_history()
     -> SQLite market_prices table
+    -> SQLite market_price_history table
+```
+
+Historical price update:
+
+```text
+PUT /api/market/history
+  -> upsert_market_price_history_many()
+    -> SQLite market_price_history table
+```
+
+Historical price read:
+
+```text
+GET /api/market/history/{ticker}?start_date=2026-01-01&end_date=2026-01-31
+  -> list_market_price_history()
+    -> ordered price history for one ticker
 ```
 
 DCA recommendation:
@@ -586,10 +625,9 @@ The current architecture is a good foundation, but still early.
 Important next pieces:
 
 - import preview before saving;
-- a historical price table, not only latest prices;
 - DCA settings stored in the database;
 - deeper frontend API integration, especially DCA settings and historical charts;
 - stronger API response schemas;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to add historical market prices, so charts can be based on stored market data instead of demo interpolation.
+The best next technical step is probably to use stored historical prices to compute real portfolio value history instead of demo interpolation.

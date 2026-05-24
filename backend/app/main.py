@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -15,12 +17,15 @@ from app.repositories import (
     ensure_account,
     get_market_prices,
     import_transactions,
+    list_market_price_history,
     list_accounts as load_accounts,
     list_portfolios as load_portfolios,
     list_transactions as load_transactions,
+    MarketPriceHistoryPoint,
     upsert_market_price,
+    upsert_market_price_history_many,
 )
-from app.schemas import AccountIn, DcaRequest, PortfolioIn, PriceMap, TransactionIn
+from app.schemas import AccountIn, DcaRequest, MarketPriceHistoryIn, PortfolioIn, PriceMap, TransactionIn
 from app.services.csv_import import parse_transactions_csv
 from app.services.dca import calculate_enhanced_dca
 from app.services.market_data import YFinanceMarketDataProvider
@@ -182,6 +187,46 @@ def get_market_quote(ticker: str, db: Session = Depends(get_db)) -> dict[str, ob
     }
 
 
+@app.put("/api/market/history")
+def set_market_price_history(payload: MarketPriceHistoryIn, db: Session = Depends(get_db)) -> dict[str, object]:
+    points = [
+        MarketPriceHistoryPoint(
+            symbol=price.symbol,
+            price_date=price.price_date,
+            open=price.open,
+            high=price.high,
+            low=price.low,
+            close=price.close,
+            adjusted_close=price.adjusted_close,
+            volume=price.volume,
+            currency=price.currency,
+            source=price.source,
+        )
+        for price in payload.prices
+    ]
+    return {"updated": upsert_market_price_history_many(db, points)}
+
+
+@app.get("/api/market/history/{ticker}")
+def get_market_price_history(
+    ticker: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    source: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    return [
+        _market_price_history_payload(record)
+        for record in list_market_price_history(
+            db,
+            symbol=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
+        )
+    ]
+
+
 @app.get("/api/portfolio")
 def get_portfolio(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
@@ -218,4 +263,19 @@ def _account_payload(record: object | None) -> dict[str, object]:
         "account_type": record.account_type,
         "currency": record.currency,
         "created_at": record.created_at,
+    }
+
+
+def _market_price_history_payload(record: object) -> dict[str, object]:
+    return {
+        "symbol": record.symbol,
+        "price_date": record.price_date,
+        "open": record.open,
+        "high": record.high,
+        "low": record.low,
+        "close": record.close,
+        "adjusted_close": record.adjusted_close,
+        "volume": record.volume,
+        "currency": record.currency,
+        "source": record.source,
     }

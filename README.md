@@ -133,7 +133,7 @@ GET    /api/portfolio
 POST   /api/dca/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, and latest market prices. CSV imports skip duplicate transactions and return an import summary.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, latest market prices, and historical market prices. CSV imports skip duplicate transactions and return an import summary.
 
 ## Run Service Tests
 
@@ -152,6 +152,7 @@ Covered behavior:
 - Enhanced DCA amount adjustment.
 - SQLite repository persistence when SQLAlchemy is installed.
 - duplicate-safe CSV import sessions.
+- historical market price storage and range reads.
 
 ## CSV Import Format
 

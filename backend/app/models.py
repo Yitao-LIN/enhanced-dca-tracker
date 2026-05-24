@@ -86,3 +86,21 @@ class MarketPriceRecord(Base):
     currency: Mapped[str] = mapped_column(String(8), default="EUR")
     as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     source: Mapped[str] = mapped_column(String(32), default="manual")
+
+
+class MarketPriceHistoryRecord(Base):
+    __tablename__ = "market_price_history"
+    __table_args__ = (UniqueConstraint("symbol", "price_date", "source", name="uq_market_price_history_symbol_date_source"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    price_date: Mapped[date] = mapped_column(Date, index=True)
+    open: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    high: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    low: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    close: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    adjusted_close: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), default="EUR")
+    source: Mapped[str] = mapped_column(String(32), default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
