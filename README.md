@@ -65,7 +65,8 @@ The frontend currently runs without a build step. It uses React from a CDN and i
 - editable current prices;
 - portfolio metrics and holdings table;
 - portfolio/account selection from the API;
-- allocation visualization;
+- allocation visualization and backend portfolio history charting;
+- S&P 500 and Nasdaq 100 benchmark backfill controls;
 - Enhanced DCA recommendation controls.
 
 If the FastAPI backend is not available at `http://127.0.0.1:8000`, the frontend stays in demo mode and computes locally.
@@ -129,11 +130,17 @@ POST   /api/transactions
 POST   /api/transactions/upload
 PUT    /api/market/prices
 GET    /api/market/{ticker}
+PUT    /api/market/history
+GET    /api/market/history/{ticker}
+POST   /api/market/history/backfill
 GET    /api/portfolio
+GET    /api/portfolio/history
+GET    /api/dca/settings
+PUT    /api/dca/settings
 POST   /api/dca/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, latest market prices, and historical market prices. CSV imports skip duplicate transactions and return an import summary.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, latest market prices, historical market prices, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
 
 ## Run Service Tests
 
@@ -152,7 +159,9 @@ Covered behavior:
 - Enhanced DCA amount adjustment.
 - SQLite repository persistence when SQLAlchemy is installed.
 - duplicate-safe CSV import sessions.
-- historical market price storage and range reads.
+- S&P 500/Nasdaq 100 historical market price storage and range reads.
+- portfolio history and benchmark normalization.
+- persisted DCA settings.
 
 ## CSV Import Format
 
@@ -198,11 +207,11 @@ If volatility is high and the recommendation is already increasing contributions
 
 ## Next Build Steps
 
-1. Add historical market prices for tracked tickers and benchmarks.
-2. Persist DCA settings per portfolio.
-3. Add richer analytics for allocation drift, contributions, and benchmark comparison.
-4. Add authentication once local portfolio persistence is working.
-5. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.
+1. Add import preview before saving Fortuneo CSV rows.
+2. Add richer analytics for allocation drift, contributions, and benchmark comparison.
+3. Add authentication once local portfolio persistence is working.
+4. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.
+5. Move the frontend to a full React/Vite app once the standalone page becomes too large to maintain comfortably.
 
 ## License
 

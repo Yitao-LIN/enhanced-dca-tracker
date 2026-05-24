@@ -42,6 +42,9 @@ Purpose:
 - verify portfolio/account isolation;
 - verify duplicate-safe CSV imports.
 - verify historical market price upsert and range filtering.
+- verify DCA settings persistence.
+- verify portfolio history and benchmark normalization.
+- verify yfinance historical response normalization.
 
 Expected output:
 
@@ -55,8 +58,12 @@ test_enhanced_dca_increases_on_market_drawdown ... ok
 test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_summarize_portfolio_prices_holdings ... ok
 test_market_price_history_upserts_and_filters_ranges ... ok
+test_dca_settings_are_persisted_per_portfolio ... ok
+test_build_portfolio_history_with_normalized_benchmarks ... ok
+test_enhanced_dca_applies_settings_multiplier_bounds ... ok
+test_normalize_yfinance_history ... ok
 
-Ran 9 tests
+Ran 13 tests
 
 OK
 ```
@@ -161,6 +168,7 @@ Expected output includes:
 ```text
 accounts
 alembic_version
+dca_settings
 import_sessions
 market_price_history
 market_prices
@@ -427,7 +435,7 @@ Run frontend backend connection smoke tests after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 9 tests, OK
+Automated tests: 13 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works

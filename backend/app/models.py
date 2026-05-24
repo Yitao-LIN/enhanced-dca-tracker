@@ -104,3 +104,22 @@ class MarketPriceHistoryRecord(Base):
     currency: Mapped[str] = mapped_column(String(8), default="EUR")
     source: Mapped[str] = mapped_column(String(32), default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class DcaSettingsRecord(Base):
+    __tablename__ = "dca_settings"
+    __table_args__ = (UniqueConstraint("portfolio_record_id", name="uq_dca_settings_portfolio"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_record_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), index=True)
+    base_amount: Mapped[Decimal] = mapped_column(Numeric(20, 8), default=Decimal("1000"))
+    preferred_benchmark: Mapped[str] = mapped_column(String(32), default="^GSPC")
+    min_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0.7000"))
+    max_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("1.5000"))
+    contribution_frequency: Mapped[str] = mapped_column(String(32), default="monthly")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

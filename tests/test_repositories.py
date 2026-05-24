@@ -157,24 +157,24 @@ class RepositoryTests(unittest.TestCase):
                 db,
                 [
                     MarketPriceHistoryPoint(
-                        symbol="cw8.pa",
+                        symbol="^gspc",
                         price_date=date(2026, 1, 15),
-                        close=Decimal("470.50"),
-                        currency="EUR",
-                        source="manual",
+                        close=Decimal("4000"),
+                        currency="USD",
+                        source="yfinance",
                     ),
                     MarketPriceHistoryPoint(
-                        symbol="CW8.PA",
+                        symbol="^GSPC",
                         price_date=date(2026, 1, 16),
-                        close=Decimal("472.10"),
-                        currency="EUR",
-                        source="manual",
+                        close=Decimal("4040"),
+                        currency="USD",
+                        source="yfinance",
                     ),
                     MarketPriceHistoryPoint(
-                        symbol="CW8.PA",
+                        symbol="^NDX",
                         price_date=date(2026, 1, 16),
-                        close=Decimal("471.80"),
-                        currency="EUR",
+                        close=Decimal("18180"),
+                        currency="USD",
                         source="yfinance",
                     ),
                 ],
@@ -183,28 +183,52 @@ class RepositoryTests(unittest.TestCase):
                 db,
                 [
                     MarketPriceHistoryPoint(
-                        symbol="CW8.PA",
+                        symbol="^GSPC",
                         price_date=date(2026, 1, 16),
-                        close=Decimal("473.00"),
-                        currency="EUR",
-                        source="manual",
+                        close=Decimal("4050"),
+                        currency="USD",
+                        source="yfinance",
                     )
                 ],
             )
 
-            manual_history = list_market_price_history(
+            benchmark_history = list_market_price_history(
                 db,
-                symbol="CW8.PA",
+                symbol="^GSPC",
                 start_date=date(2026, 1, 16),
                 end_date=date(2026, 1, 16),
-                source="manual",
+                source="yfinance",
             )
-            full_history = list_market_price_history(db, symbol="CW8.PA")
+            full_history = list_market_price_history(db, symbol="^GSPC")
 
         self.assertEqual(updated, 3)
-        self.assertEqual(len(manual_history), 1)
-        self.assertEqual(manual_history[0].close, Decimal("473.00000000"))
-        self.assertEqual([record.price_date for record in full_history], [date(2026, 1, 15), date(2026, 1, 16), date(2026, 1, 16)])
+        self.assertEqual(len(benchmark_history), 1)
+        self.assertEqual(benchmark_history[0].close, Decimal("4050.00000000"))
+        self.assertEqual([record.price_date for record in full_history], [date(2026, 1, 15), date(2026, 1, 16)])
+
+    def test_dca_settings_are_persisted_per_portfolio(self):
+        from app.repositories import DcaSettings, get_dca_settings, upsert_dca_settings
+
+        with self.Session() as db:
+            default_settings = get_dca_settings(db)
+            default_benchmark = default_settings.preferred_benchmark
+            saved = upsert_dca_settings(
+                db,
+                DcaSettings(
+                    portfolio_id="default",
+                    base_amount=Decimal("750"),
+                    preferred_benchmark="^ndx",
+                    min_multiplier=Decimal("0.8"),
+                    max_multiplier=Decimal("1.4"),
+                    contribution_frequency="weekly",
+                ),
+            )
+            loaded = get_dca_settings(db)
+
+        self.assertEqual(default_benchmark, "^GSPC")
+        self.assertEqual(saved.preferred_benchmark, "^NDX")
+        self.assertEqual(loaded.base_amount, Decimal("750.00000000"))
+        self.assertEqual(loaded.contribution_frequency, "weekly")
 
 
 if __name__ == "__main__":

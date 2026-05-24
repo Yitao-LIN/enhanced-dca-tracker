@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.domain import MarketSnapshot, Transaction, TransactionType
 from app.models import (
     AccountRecord,
+    DcaSettingsRecord,
     ImportSessionRecord,
     MarketPriceRecord,
     MarketPriceHistoryRecord,
@@ -24,6 +25,8 @@ from app.models import (
 DEFAULT_PORTFOLIO_ID = "default"
 DEFAULT_PORTFOLIO_NAME = "Default Portfolio"
 DECIMAL_FINGERPRINT_PRECISION = Decimal("0.00000001")
+DEFAULT_DCA_BASE_AMOUNT = Decimal("1000")
+DEFAULT_DCA_BENCHMARK = "^GSPC"
 
 
 @dataclass(frozen=True)
@@ -50,6 +53,16 @@ class MarketPriceHistoryPoint:
     volume: int | None = None
     currency: str = "EUR"
     source: str = "manual"
+
+
+@dataclass(frozen=True)
+class DcaSettings:
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID
+    base_amount: Decimal = DEFAULT_DCA_BASE_AMOUNT
+    preferred_benchmark: str = DEFAULT_DCA_BENCHMARK
+    min_multiplier: Decimal = Decimal("0.7")
+    max_multiplier: Decimal = Decimal("1.5")
+    contribution_frequency: str = "monthly"
 
 
 def ensure_portfolio(
@@ -173,6 +186,41 @@ def bootstrap_reference_data(db: Session) -> None:
                 )
             )
     db.commit()
+
+
+def get_dca_settings(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> DcaSettingsRecord:
+    portfolio = ensure_portfolio(db, portfolio_id)
+    record = db.scalar(select(DcaSettingsRecord).where(DcaSettingsRecord.portfolio_record_id == portfolio.id))
+    if record is None:
+        record = DcaSettingsRecord(
+            portfolio_record_id=portfolio.id,
+            base_amount=DEFAULT_DCA_BASE_AMOUNT,
+            preferred_benchmark=DEFAULT_DCA_BENCHMARK,
+            min_multiplier=Decimal("0.7"),
+            max_multiplier=Decimal("1.5"),
+            contribution_frequency="monthly",
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+    return record
+
+
+def upsert_dca_settings(db: Session, settings: DcaSettings) -> DcaSettingsRecord:
+    portfolio = ensure_portfolio(db, settings.portfolio_id)
+    record = db.scalar(select(DcaSettingsRecord).where(DcaSettingsRecord.portfolio_record_id == portfolio.id))
+    if record is None:
+        record = DcaSettingsRecord(portfolio_record_id=portfolio.id)
+        db.add(record)
+
+    record.base_amount = settings.base_amount
+    record.preferred_benchmark = settings.preferred_benchmark.upper()
+    record.min_multiplier = settings.min_multiplier
+    record.max_multiplier = settings.max_multiplier
+    record.contribution_frequency = settings.contribution_frequency.lower()
+    db.commit()
+    db.refresh(record)
+    return record
 
 
 def add_transaction(db: Session, transaction: Transaction, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> TransactionRecord:

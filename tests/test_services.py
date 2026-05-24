@@ -1,9 +1,15 @@
 import unittest
+from datetime import date
 from decimal import Decimal
 
+import pandas as pd
+
+from app.domain import Transaction, TransactionType
 from app.services.csv_import import parse_transactions_csv
 from app.services.dca import calculate_enhanced_dca
+from app.services.market_data import normalize_yfinance_history
 from app.services.portfolio import build_holdings, summarize_portfolio
+from app.services.portfolio_history import build_portfolio_history
 
 
 class CsvImportTests(unittest.TestCase):
@@ -49,6 +55,32 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(summary.total_invested, Decimal("200.00"))
         self.assertEqual(summary.total_gain_percent, Decimal("25.00"))
 
+    def test_build_portfolio_history_with_normalized_benchmarks(self):
+        transactions = [
+            Transaction(
+                transaction_date=date(2026, 1, 15),
+                ticker="ABC",
+                transaction_type=TransactionType.BUY,
+                quantity=Decimal("2"),
+                price=Decimal("100"),
+            )
+        ]
+
+        history = build_portfolio_history(
+            transactions,
+            prices_by_symbol={"ABC": {date(2026, 1, 15): Decimal("110"), date(2026, 1, 16): Decimal("120")}},
+            benchmarks_by_symbol={
+                "^GSPC": {date(2026, 1, 15): Decimal("4000"), date(2026, 1, 16): Decimal("4040")},
+                "^NDX": {date(2026, 1, 15): Decimal("18000"), date(2026, 1, 16): Decimal("18180")},
+            },
+        )
+
+        self.assertEqual([point.price_date for point in history], [date(2026, 1, 15), date(2026, 1, 16)])
+        self.assertEqual(history[0].market_value, Decimal("220.00"))
+        self.assertEqual(history[1].market_value, Decimal("240.00"))
+        self.assertEqual(history[1].benchmarks["^GSPC"], Decimal("222.20"))
+        self.assertEqual(history[1].benchmarks["^NDX"], Decimal("222.20"))
+
 
 class DcaTests(unittest.TestCase):
     def test_enhanced_dca_increases_on_market_drawdown(self):
@@ -60,6 +92,41 @@ class DcaTests(unittest.TestCase):
 
         self.assertEqual(recommendation.adjusted_amount, Decimal("1300.00"))
         self.assertEqual(recommendation.multiplier, Decimal("1.3"))
+
+    def test_enhanced_dca_applies_settings_multiplier_bounds(self):
+        recommendation = calculate_enhanced_dca(
+            base_amount=Decimal("1000"),
+            market_change_percent=Decimal("-6"),
+            volatility_index=Decimal("32"),
+            max_multiplier=Decimal("1.5"),
+        )
+
+        self.assertEqual(recommendation.adjusted_amount, Decimal("1500.00"))
+        self.assertEqual(recommendation.multiplier, Decimal("1.5"))
+
+
+class MarketDataTests(unittest.TestCase):
+    def test_normalize_yfinance_history(self):
+        frame = pd.DataFrame(
+            {
+                "Open": [Decimal("4000")],
+                "High": [Decimal("4050")],
+                "Low": [Decimal("3990")],
+                "Close": [Decimal("4040")],
+                "Adj Close": [Decimal("4040")],
+                "Volume": [123456],
+            },
+            index=pd.to_datetime(["2026-01-16"]),
+        )
+
+        points = normalize_yfinance_history("^gspc", frame, currency="usd", source="yfinance")
+
+        self.assertEqual(len(points), 1)
+        self.assertEqual(points[0].symbol, "^GSPC")
+        self.assertEqual(points[0].price_date, date(2026, 1, 16))
+        self.assertEqual(points[0].close, Decimal("4040"))
+        self.assertEqual(points[0].volume, 123456)
+        self.assertEqual(points[0].currency, "USD")
 
 
 if __name__ == "__main__":

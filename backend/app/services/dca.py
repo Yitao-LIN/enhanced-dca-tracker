@@ -9,6 +9,8 @@ def calculate_enhanced_dca(
     base_amount: Decimal,
     market_change_percent: Decimal,
     volatility_index: Decimal | None = None,
+    min_multiplier: Decimal | None = None,
+    max_multiplier: Decimal | None = None,
 ) -> DcaRecommendation:
     multiplier = Decimal("1.0")
     reason_parts = []
@@ -37,6 +39,13 @@ def calculate_enhanced_dca(
     elif volatility_index is not None and volatility_index <= Decimal("14") and multiplier > Decimal("1.0"):
         multiplier -= Decimal("0.1")
         reason_parts.append("volatility is low")
+
+    if min_multiplier is not None and multiplier < min_multiplier:
+        multiplier = min_multiplier
+        reason_parts.append("minimum multiplier applied")
+    if max_multiplier is not None and multiplier > max_multiplier:
+        multiplier = max_multiplier
+        reason_parts.append("maximum multiplier applied")
 
     adjusted_amount = quantize_money(base_amount * multiplier)
     action = "increase" if multiplier > 1 else "decrease" if multiplier < 1 else "keep"

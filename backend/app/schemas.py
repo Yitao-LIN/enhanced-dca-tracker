@@ -54,10 +54,38 @@ class MarketPriceHistoryIn(BaseModel):
     prices: list[MarketPriceHistoryPointIn]
 
 
+class MarketHistoryBackfillRequest(BaseModel):
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    start_date: date
+    end_date: date
+    currency: str = "USD"
+    source: str = "yfinance"
+
+
+class PortfolioHistoryRequest(BaseModel):
+    portfolio_id: str = "default"
+    start_date: date | None = None
+    end_date: date | None = None
+
+
+class DcaSettingsIn(BaseModel):
+    portfolio_id: str = "default"
+    base_amount: Decimal = Decimal("1000")
+    preferred_benchmark: str = "^GSPC"
+    min_multiplier: Decimal = Decimal("0.7")
+    max_multiplier: Decimal = Decimal("1.5")
+    contribution_frequency: str = "monthly"
+
+
 class DcaRequest(BaseModel):
-    base_amount: Decimal
-    market_change_percent: Decimal
+    base_amount: Decimal | None = None
+    market_change_percent: Decimal | None = None
     volatility_index: Decimal | None = None
+    portfolio_id: str = "default"
+    benchmark_symbol: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 class ApiModel(BaseModel):

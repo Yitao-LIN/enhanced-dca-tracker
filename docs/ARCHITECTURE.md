@@ -213,6 +213,7 @@ Alembic owns schema changes. The current initial migration creates:
 - import sessions;
 - latest market prices.
 - historical market prices.
+- DCA settings.
 
 Run migrations manually from `backend/`:
 
@@ -244,6 +245,7 @@ TransactionFingerprintRecord
 ImportSessionRecord
 MarketPriceRecord
 MarketPriceHistoryRecord
+DcaSettingsRecord
 ```
 
 `PortfolioRecord` stores a named portfolio, such as the default personal portfolio or a future strategy-specific portfolio.
@@ -325,7 +327,9 @@ Important fields:
 - `currency`
 - `source`
 
-The latest-price table is useful for current portfolio valuation. The history table is the foundation for real performance charts, benchmark comparisons, and backfills from providers such as Yahoo Finance.
+The latest-price table is useful for current portfolio valuation. The history table backs real performance charts, S&P 500/Nasdaq 100 benchmark comparisons, and backfills from providers such as Yahoo Finance.
+
+`DcaSettingsRecord` stores portfolio-specific DCA preferences, including base amount, preferred benchmark, multiplier bounds, and contribution frequency.
 
 ## Repositories
 
@@ -347,6 +351,7 @@ They know how to:
 - save or update market prices;
 - save or update historical market prices;
 - read historical market prices by symbol, date range, and source;
+- save and load DCA settings;
 - return current prices as a `{ticker: price}` dictionary.
 
 Current repository functions:
@@ -366,6 +371,8 @@ upsert_market_price()
 get_market_prices()
 upsert_market_price_history_many()
 list_market_price_history()
+get_dca_settings()
+upsert_dca_settings()
 ```
 
 This keeps SQLAlchemy code out of `main.py` and out of the business calculation services.
@@ -580,6 +587,25 @@ GET /api/market/history/{ticker}?start_date=2026-01-01&end_date=2026-01-31
     -> ordered price history for one ticker
 ```
 
+Historical benchmark backfill:
+
+```text
+POST /api/market/history/backfill
+  -> YFinanceMarketDataProvider.historical_prices()
+  -> upsert_market_price_history_many()
+    -> SQLite market_price_history table
+```
+
+Portfolio history:
+
+```text
+GET /api/portfolio/history
+  -> list_transactions()
+  -> list_market_price_history()
+  -> build_portfolio_history()
+    -> invested, value, gain, S&P 500, Nasdaq 100 series
+```
+
 DCA recommendation:
 
 ```text
@@ -625,9 +651,8 @@ The current architecture is a good foundation, but still early.
 Important next pieces:
 
 - import preview before saving;
-- DCA settings stored in the database;
-- deeper frontend API integration, especially DCA settings and historical charts;
+- richer allocation drift and contribution analytics;
 - stronger API response schemas;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to use stored historical prices to compute real portfolio value history instead of demo interpolation.
+The best next technical step is probably to add import preview before saving real Fortuneo CSV rows.

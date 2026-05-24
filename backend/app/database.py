@@ -66,7 +66,9 @@ def _needs_legacy_baseline_stamp() -> bool:
     table_names = set(inspector.get_table_names())
     app_tables = {
         "accounts",
+        "dca_settings",
         "import_sessions",
+        "market_price_history",
         "market_prices",
         "portfolios",
         "transaction_fingerprints",
