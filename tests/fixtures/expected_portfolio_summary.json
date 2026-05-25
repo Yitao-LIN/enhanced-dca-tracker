@@ -1,0 +1,139 @@
+{
+  "source_csv": "fortuneo_golden.csv",
+  "source_prices": "market_history_basic.json",
+  "transaction_count": 8,
+  "account_names": ["CTO", "PEA"],
+  "total_value": "2991.10",
+  "total_invested": "2807.48",
+  "total_gain": "183.62",
+  "total_gain_percent": "6.54",
+  "cash_flow": "-2759.75",
+  "holdings": [
+    {
+      "ticker": "CW8.PA",
+      "quantity": "5",
+      "average_cost": "479.43",
+      "current_price": "512.30",
+      "invested_amount": "2397.17",
+      "market_value": "2561.50",
+      "unrealized_gain": "164.33",
+      "unrealized_gain_percent": "6.86",
+      "allocation_percent": "85.64",
+      "currency": "EUR"
+    },
+    {
+      "ticker": "EWLD.PA",
+      "quantity": "6",
+      "average_cost": "32.84",
+      "current_price": "35.10",
+      "invested_amount": "197.06",
+      "market_value": "210.60",
+      "unrealized_gain": "13.54",
+      "unrealized_gain_percent": "6.87",
+      "allocation_percent": "7.04",
+      "currency": "EUR"
+    },
+    {
+      "ticker": "VEUR.AS",
+      "quantity": "5",
+      "average_cost": "42.65",
+      "current_price": "43.80",
+      "invested_amount": "213.25",
+      "market_value": "219.00",
+      "unrealized_gain": "5.75",
+      "unrealized_gain_percent": "2.70",
+      "allocation_percent": "7.32",
+      "currency": "EUR"
+    }
+  ],
+  "portfolio_history": [
+    {
+      "date": "2026-01-15",
+      "invested_amount": "1413.45",
+      "market_value": "1411.50",
+      "gain": "-1.95",
+      "gain_percent": "-0.14",
+      "benchmarks": {
+        "^GSPC": "1411.50",
+        "^NDX": "1411.50"
+      }
+    },
+    {
+      "date": "2026-02-15",
+      "invested_amount": "2375.60",
+      "market_value": "2400.50",
+      "gain": "24.90",
+      "gain_percent": "1.05",
+      "benchmarks": {
+        "^GSPC": "1440.91",
+        "^NDX": "1444.71"
+      }
+    },
+    {
+      "date": "2026-03-15",
+      "invested_amount": "2638.35",
+      "market_value": "2661.30",
+      "gain": "22.95",
+      "gain_percent": "0.87",
+      "benchmarks": {
+        "^GSPC": "1470.31",
+        "^NDX": "1477.92"
+      }
+    },
+    {
+      "date": "2026-04-20",
+      "invested_amount": "2572.66",
+      "market_value": "2730.20",
+      "gain": "157.54",
+      "gain_percent": "6.12",
+      "benchmarks": {
+        "^GSPC": "1455.61",
+        "^NDX": "1461.32"
+      }
+    },
+    {
+      "date": "2026-04-22",
+      "invested_amount": "2572.66",
+      "market_value": "2730.20",
+      "gain": "157.54",
+      "gain_percent": "6.12",
+      "benchmarks": {
+        "^GSPC": "1455.61",
+        "^NDX": "1461.32"
+      }
+    },
+    {
+      "date": "2026-05-02",
+      "invested_amount": "2785.91",
+      "market_value": "2940.95",
+      "gain": "155.04",
+      "gain_percent": "5.57",
+      "benchmarks": {
+        "^GSPC": "1455.61",
+        "^NDX": "1461.32"
+      }
+    },
+    {
+      "date": "2026-05-10",
+      "invested_amount": "3286.91",
+      "market_value": "3445.95",
+      "gain": "159.04",
+      "gain_percent": "4.84",
+      "benchmarks": {
+        "^GSPC": "1455.61",
+        "^NDX": "1461.32"
+      }
+    },
+    {
+      "date": "2026-05-16",
+      "invested_amount": "2807.48",
+      "market_value": "2991.10",
+      "gain": "183.62",
+      "gain_percent": "6.54",
+      "benchmarks": {
+        "^GSPC": "1499.72",
+        "^NDX": "1511.14"
+      }
+    }
+  ]
+}

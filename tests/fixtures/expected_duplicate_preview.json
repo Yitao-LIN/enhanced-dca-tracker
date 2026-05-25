@@ -1,0 +1,48 @@
+{
+  "source_csv": "fortuneo_duplicate_rows.csv",
+  "row_count": 3,
+  "valid_count": 3,
+  "duplicate_count": 1,
+  "error_count": 0,
+  "rows": [
+    {
+      "row_number": 2,
+      "status": "new",
+      "transaction_date": "2026-01-15",
+      "transaction_type": "buy",
+      "ticker": "CW8.PA",
+      "quantity": "3",
+      "price": "470.50",
+      "fees": "1.95",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Amundi MSCI World first lot"
+    },
+    {
+      "row_number": 3,
+      "status": "duplicate_in_file",
+      "transaction_date": "2026-01-15",
+      "transaction_type": "buy",
+      "ticker": "CW8.PA",
+      "quantity": "3",
+      "price": "470.50",
+      "fees": "1.95",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Amundi MSCI World first lot"
+    },
+    {
+      "row_number": 4,
+      "status": "new",
+      "transaction_date": "2026-05-02",
+      "transaction_type": "buy",
+      "ticker": "VEUR.AS",
+      "quantity": "5",
+      "price": "42.15",
+      "fees": "2.50",
+      "currency": "EUR",
+      "account": "CTO",
+      "description": "Europe ETF"
+    }
+  ]
+}

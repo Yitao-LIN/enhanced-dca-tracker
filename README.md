@@ -51,6 +51,9 @@ docs/TESTING.md
 |-- samples/
 |   `-- fortuneo_transactions_sample.csv
 `-- tests/
+    |-- fixtures/                       # synthetic golden CSV/JSON data
+    |-- test_fixtures.py                # fixture validation
+    |-- test_repositories.py
     `-- test_services.py
 ```
 
@@ -162,6 +165,7 @@ Covered behavior:
 - S&P 500/Nasdaq 100 historical market price storage and range reads.
 - portfolio history and benchmark normalization.
 - persisted DCA settings.
+- synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
 
 ## CSV Import Format
 

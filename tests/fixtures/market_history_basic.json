@@ -1,0 +1,142 @@
+{
+  "latest_prices": {
+    "CW8.PA": "512.30",
+    "EWLD.PA": "35.10",
+    "VEUR.AS": "43.80"
+  },
+  "prices": [
+    {
+      "symbol": "CW8.PA",
+      "price_date": "2026-01-15",
+      "close": "470.50",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "CW8.PA",
+      "price_date": "2026-02-15",
+      "close": "480.10",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "CW8.PA",
+      "price_date": "2026-04-20",
+      "close": "505.00",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "CW8.PA",
+      "price_date": "2026-05-16",
+      "close": "512.30",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "EWLD.PA",
+      "price_date": "2026-03-15",
+      "close": "32.60",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "EWLD.PA",
+      "price_date": "2026-04-20",
+      "close": "34.20",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "EWLD.PA",
+      "price_date": "2026-05-16",
+      "close": "35.10",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "VEUR.AS",
+      "price_date": "2026-05-02",
+      "close": "42.15",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "VEUR.AS",
+      "price_date": "2026-05-16",
+      "close": "43.80",
+      "currency": "EUR",
+      "source": "manual"
+    },
+    {
+      "symbol": "^GSPC",
+      "price_date": "2026-01-15",
+      "close": "4800",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^GSPC",
+      "price_date": "2026-02-15",
+      "close": "4900",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^GSPC",
+      "price_date": "2026-03-15",
+      "close": "5000",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^GSPC",
+      "price_date": "2026-04-20",
+      "close": "4950",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^GSPC",
+      "price_date": "2026-05-16",
+      "close": "5100",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^NDX",
+      "price_date": "2026-01-15",
+      "close": "17000",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^NDX",
+      "price_date": "2026-02-15",
+      "close": "17400",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^NDX",
+      "price_date": "2026-03-15",
+      "close": "17800",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^NDX",
+      "price_date": "2026-04-20",
+      "close": "17600",
+      "currency": "USD",
+      "source": "manual"
+    },
+    {
+      "symbol": "^NDX",
+      "price_date": "2026-05-16",
+      "close": "18200",
+      "currency": "USD",
+      "source": "manual"
+    }
+  ]
+}

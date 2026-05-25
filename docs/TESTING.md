@@ -45,6 +45,7 @@ Purpose:
 - verify DCA settings persistence.
 - verify portfolio history and benchmark normalization.
 - verify yfinance historical response normalization.
+- verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
 
 Expected output:
 
@@ -62,8 +63,11 @@ test_dca_settings_are_persisted_per_portfolio ... ok
 test_build_portfolio_history_with_normalized_benchmarks ... ok
 test_enhanced_dca_applies_settings_multiplier_bounds ... ok
 test_normalize_yfinance_history ... ok
+test_duplicate_preview_fixture_marks_duplicate_rows ... ok
+test_golden_fixture_matches_expected_portfolio_history ... ok
+test_golden_fixture_matches_expected_summary ... ok
 
-Ran 13 tests
+Ran 16 tests
 
 OK
 ```
@@ -430,12 +434,43 @@ Run frontend backend connection smoke tests after changing:
 - backend CORS config;
 - API route payloads used by the frontend.
 
+## Synthetic Fixture Dataset
+
+The repository includes a small synthetic golden dataset under:
+
+```text
+tests/fixtures/
+```
+
+Purpose:
+
+- provide stable Fortuneo-style CSV data without using private real transactions;
+- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, and benchmark prices;
+- give future API response schema, route, and import-preview tests exact expected outputs.
+
+Key files:
+
+- `fortuneo_golden.csv`
+- `fortuneo_duplicate_rows.csv`
+- `market_history_basic.json`
+- `expected_portfolio_summary.json`
+- `expected_import_preview.json`
+- `expected_duplicate_preview.json`
+
+The fixture validation tests live in:
+
+```text
+tests/test_fixtures.py
+```
+
+Update the expected JSON files whenever intentional business logic changes alter cost basis, cash flow, portfolio history, duplicate detection, or preview payloads.
+
 ## Current Baseline
 
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 13 tests, OK
+Automated tests: 16 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works

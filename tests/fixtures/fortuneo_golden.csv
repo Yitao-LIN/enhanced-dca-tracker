@@ -1,0 +1,9 @@
+Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;Libelle
+15/01/2026;Achat;CW8.PA;3;470,50;1,95;EUR;PEA;Amundi MSCI World first lot
+15/02/2026;Achat;CW8.PA;2;480,10;1,95;EUR;PEA;Amundi MSCI World second lot
+15/03/2026;Achat;EWLD.PA;8;32,60;1,95;EUR;PEA;Amundi World
+20/04/2026;Vente;EWLD.PA;2;34,20;1,95;EUR;PEA;Partial rebalance
+22/04/2026;Dividende;CW8.PA;1;12,40;0;EUR;PEA;Distribution
+02/05/2026;Achat;VEUR.AS;5;42,15;2,50;EUR;CTO;Europe ETF
+10/05/2026;Achat;CW8.PA;1;500,00;1,00;EUR;CTO;Extra world ETF lot
+16/05/2026;Vente;CW8.PA;1;515,00;1,00;EUR;PEA;Trim world ETF

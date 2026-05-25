@@ -1,0 +1,113 @@
+{
+  "source_csv": "fortuneo_golden.csv",
+  "row_count": 8,
+  "valid_count": 8,
+  "duplicate_count": 0,
+  "error_count": 0,
+  "rows": [
+    {
+      "row_number": 2,
+      "status": "new",
+      "transaction_date": "2026-01-15",
+      "transaction_type": "buy",
+      "ticker": "CW8.PA",
+      "quantity": "3",
+      "price": "470.50",
+      "fees": "1.95",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Amundi MSCI World first lot"
+    },
+    {
+      "row_number": 3,
+      "status": "new",
+      "transaction_date": "2026-02-15",
+      "transaction_type": "buy",
+      "ticker": "CW8.PA",
+      "quantity": "2",
+      "price": "480.10",
+      "fees": "1.95",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Amundi MSCI World second lot"
+    },
+    {
+      "row_number": 4,
+      "status": "new",
+      "transaction_date": "2026-03-15",
+      "transaction_type": "buy",
+      "ticker": "EWLD.PA",
+      "quantity": "8",
+      "price": "32.60",
+      "fees": "1.95",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Amundi World"
+    },
+    {
+      "row_number": 5,
+      "status": "new",
+      "transaction_date": "2026-04-20",
+      "transaction_type": "sell",
+      "ticker": "EWLD.PA",
+      "quantity": "2",
+      "price": "34.20",
+      "fees": "1.95",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Partial rebalance"
+    },
+    {
+      "row_number": 6,
+      "status": "new",
+      "transaction_date": "2026-04-22",
+      "transaction_type": "dividend",
+      "ticker": "CW8.PA",
+      "quantity": "1",
+      "price": "12.40",
+      "fees": "0",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Distribution"
+    },
+    {
+      "row_number": 7,
+      "status": "new",
+      "transaction_date": "2026-05-02",
+      "transaction_type": "buy",
+      "ticker": "VEUR.AS",
+      "quantity": "5",
+      "price": "42.15",
+      "fees": "2.50",
+      "currency": "EUR",
+      "account": "CTO",
+      "description": "Europe ETF"
+    },
+    {
+      "row_number": 8,
+      "status": "new",
+      "transaction_date": "2026-05-10",
+      "transaction_type": "buy",
+      "ticker": "CW8.PA",
+      "quantity": "1",
+      "price": "500.00",
+      "fees": "1.00",
+      "currency": "EUR",
+      "account": "CTO",
+      "description": "Extra world ETF lot"
+    },
+    {
+      "row_number": 9,
+      "status": "new",
+      "transaction_date": "2026-05-16",
+      "transaction_type": "sell",
+      "ticker": "CW8.PA",
+      "quantity": "1",
+      "price": "515.00",
+      "fees": "1.00",
+      "currency": "EUR",
+      "account": "PEA",
+      "description": "Trim world ETF"
+    }
+  ]
+}
