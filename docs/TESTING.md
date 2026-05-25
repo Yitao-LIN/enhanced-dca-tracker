@@ -24,7 +24,7 @@ For Python imports, the backend package path must be available:
 $env:PYTHONPATH = "backend"
 ```
 
-## Automated Unit And Repository Tests
+## Automated Tests
 
 Run:
 
@@ -57,22 +57,22 @@ test_invalid_csv_upload_returns_bad_request ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
 test_portfolio_summary_matches_golden_fixture ... ok
 test_upload_transactions_skips_duplicates_and_lists_accounts ... ok
-test_import_allows_same_security_with_different_quantity ... ok
-test_import_skips_duplicate_transactions ... ok
-test_keeps_portfolios_isolated ... ok
-test_persists_transactions_and_prices ... ok
-test_parse_fortuneo_style_csv ... ok
-test_enhanced_dca_increases_on_market_drawdown ... ok
-test_build_holdings_reduces_cost_basis_on_sell ... ok
-test_summarize_portfolio_prices_holdings ... ok
-test_market_price_history_upserts_and_filters_ranges ... ok
-test_dca_settings_are_persisted_per_portfolio ... ok
-test_build_portfolio_history_with_normalized_benchmarks ... ok
-test_enhanced_dca_applies_settings_multiplier_bounds ... ok
-test_normalize_yfinance_history ... ok
 test_duplicate_preview_fixture_marks_duplicate_rows ... ok
 test_golden_fixture_matches_expected_portfolio_history ... ok
 test_golden_fixture_matches_expected_summary ... ok
+test_dca_settings_are_persisted_per_portfolio ... ok
+test_import_allows_same_security_with_different_quantity ... ok
+test_import_skips_duplicate_transactions ... ok
+test_keeps_portfolios_isolated ... ok
+test_market_price_history_upserts_and_filters_ranges ... ok
+test_persists_transactions_and_prices ... ok
+test_parse_fortuneo_style_csv ... ok
+test_enhanced_dca_applies_settings_multiplier_bounds ... ok
+test_enhanced_dca_increases_on_market_drawdown ... ok
+test_normalize_yfinance_history ... ok
+test_build_holdings_reduces_cost_basis_on_sell ... ok
+test_build_portfolio_history_with_normalized_benchmarks ... ok
+test_summarize_portfolio_prices_holdings ... ok
 
 Ran 22 tests
 

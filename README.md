@@ -42,10 +42,11 @@ docs/TESTING.md
 |       |-- domain.py                  # core dataclasses
 |       |-- models.py                  # SQLite/PostgreSQL-compatible tables
 |       |-- repositories.py            # persistence adapters
-|       |-- schemas.py                 # API request schemas
+|       |-- schemas.py                 # API request/response schemas
 |       `-- services/
 |           |-- csv_import.py          # Fortuneo-like CSV parser
 |           |-- portfolio.py           # holdings and performance calculations
+|           |-- portfolio_history.py   # historical portfolio and benchmark series
 |           |-- dca.py                 # Enhanced DCA recommendation engine
 |           `-- market_data.py         # static and yfinance market providers
 |-- samples/
@@ -121,7 +122,7 @@ alembic -c backend/alembic.ini upgrade head
 
 Existing local SQLite databases created before Alembic are automatically baselined on first startup.
 
-The API will expose:
+The API exposes:
 
 ```text
 GET    /api/health
@@ -146,9 +147,9 @@ POST   /api/dca/recommendation
 
 Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, latest market prices, historical market prices, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
 
-## Run Service Tests
+## Run Automated Tests
 
-The service tests do not require FastAPI or network access. For full testing guidance, see `docs/TESTING.md`.
+The automated tests use local fixtures and isolated SQLite databases. They do not require network access. For full testing guidance, see `docs/TESTING.md`.
 
 ```powershell
 $env:PYTHONPATH = "backend"

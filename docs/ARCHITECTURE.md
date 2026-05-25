@@ -69,18 +69,24 @@ This file defines the FastAPI application and its HTTP routes.
 Current API routes:
 
 ```text
-GET  /api/health
-GET  /api/portfolios
-POST /api/portfolios
-GET  /api/accounts
-POST /api/accounts
-GET  /api/transactions
-POST /api/transactions
-POST /api/transactions/upload
-PUT  /api/market/prices
-GET  /api/market/{ticker}
-GET  /api/portfolio
-POST /api/dca/recommendation
+GET    /api/health
+GET    /api/portfolios
+POST   /api/portfolios
+GET    /api/accounts
+POST   /api/accounts
+GET    /api/transactions
+POST   /api/transactions
+POST   /api/transactions/upload
+PUT    /api/market/prices
+GET    /api/market/{ticker}
+PUT    /api/market/history
+GET    /api/market/history/{ticker}
+POST   /api/market/history/backfill
+GET    /api/portfolio
+GET    /api/portfolio/history
+GET    /api/dca/settings
+PUT    /api/dca/settings
+POST   /api/dca/recommendation
 ```
 
 Each route that needs persistence receives a SQLAlchemy database session:
@@ -137,19 +143,36 @@ Keeping these objects separate from SQLAlchemy makes the financial logic easier 
 backend/app/schemas.py
 ```
 
-This file contains Pydantic models used for validating API request bodies.
+This file contains Pydantic models used for validating API request bodies and serializing API responses.
 
-Current schemas:
+Current request schemas:
 
 ```python
 PortfolioIn
 AccountIn
 TransactionIn
 PriceMap
+MarketPriceHistoryIn
+MarketHistoryBackfillRequest
+DcaSettingsIn
 DcaRequest
 ```
 
-When the frontend sends JSON to FastAPI, FastAPI validates it with these schemas before the data reaches repositories or services.
+Current response schemas include:
+
+```python
+PortfolioOut
+AccountOut
+TransactionOut
+ImportSummaryOut
+MarketPriceHistoryPointOut
+PortfolioSummaryOut
+PortfolioHistoryPointOut
+DcaSettingsOut
+DcaRecommendationOut
+```
+
+When the frontend sends JSON to FastAPI, FastAPI validates it with request schemas before the data reaches repositories or services. When routes return data, FastAPI validates and serializes it with response schemas.
 
 Example request body for `DcaRequest`:
 
@@ -204,7 +227,7 @@ backend/alembic.ini
 backend/alembic/
 ```
 
-Alembic owns schema changes. The current initial migration creates:
+Alembic owns schema changes. The current migration chain creates:
 
 - portfolios;
 - accounts;
@@ -516,6 +539,18 @@ Tests the SQLAlchemy repository layer with an in-memory SQLite database.
 
 It is skipped if SQLAlchemy is not installed. Inside the project `.venv`, it should run.
 
+```text
+tests/test_fixtures.py
+```
+
+Keeps the synthetic golden fixture dataset aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
+
+```text
+tests/test_api_routes.py
+```
+
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover upload, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
+
 ## Current Data Flows
 
 CSV upload:
@@ -652,7 +687,7 @@ Important next pieces:
 
 - import preview before saving;
 - richer allocation drift and contribution analytics;
-- stronger API response schemas;
+- broader route coverage as new API endpoints are added;
 - authentication later, once the local portfolio workflow feels right.
 
 The best next technical step is probably to add import preview before saving real Fortuneo CSV rows.
