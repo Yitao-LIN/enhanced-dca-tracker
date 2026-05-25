@@ -31,13 +31,27 @@ from app.repositories import (
 )
 from app.schemas import (
     AccountIn,
+    AccountOut,
     DcaRequest,
+    DcaRecommendationOut,
     DcaSettingsIn,
+    DcaSettingsOut,
+    HealthOut,
+    ImportSummaryOut,
+    MarketHistoryBackfillOut,
     MarketHistoryBackfillRequest,
     MarketPriceHistoryIn,
+    MarketPriceHistoryPointOut,
+    MarketQuoteOut,
+    PortfolioHistoryPointOut,
     PortfolioIn,
+    PortfolioOut,
+    PortfolioSummaryOut,
     PriceMap,
+    TransactionCreateOut,
     TransactionIn,
+    TransactionOut,
+    UpdatedCountOut,
 )
 from app.services.csv_import import parse_transactions_csv
 from app.services.dca import calculate_enhanced_dca
@@ -71,17 +85,17 @@ def on_startup() -> None:
         bootstrap_reference_data(db)
 
 
-@app.get("/api/health")
+@app.get("/api/health", response_model=HealthOut)
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/portfolios")
+@app.get("/api/portfolios", response_model=list[PortfolioOut])
 def list_portfolios(db: Session = Depends(get_db)) -> list[dict[str, object]]:
     return [_portfolio_payload(record) for record in load_portfolios(db)]
 
 
-@app.post("/api/portfolios")
+@app.post("/api/portfolios", response_model=PortfolioOut)
 def add_portfolio(payload: PortfolioIn, db: Session = Depends(get_db)) -> dict[str, object]:
     record = create_portfolio(
         db,
@@ -92,7 +106,7 @@ def add_portfolio(payload: PortfolioIn, db: Session = Depends(get_db)) -> dict[s
     return _portfolio_payload(record)
 
 
-@app.get("/api/accounts")
+@app.get("/api/accounts", response_model=list[AccountOut])
 def list_accounts(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
@@ -100,7 +114,7 @@ def list_accounts(
     return [_account_payload(record) for record in load_accounts(db, portfolio_id=portfolio_id)]
 
 
-@app.post("/api/accounts")
+@app.post("/api/accounts", response_model=AccountOut)
 def add_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, object]:
     record = ensure_account(
         db,
@@ -113,7 +127,7 @@ def add_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, 
     return _account_payload(record)
 
 
-@app.post("/api/transactions")
+@app.post("/api/transactions", response_model=TransactionCreateOut)
 def add_transaction(payload: TransactionIn, db: Session = Depends(get_db)) -> dict[str, object]:
     transaction = Transaction(
         transaction_date=payload.transaction_date,
@@ -130,7 +144,7 @@ def add_transaction(payload: TransactionIn, db: Session = Depends(get_db)) -> di
     return {"created": True, "count": count_transactions(db, portfolio_id=payload.portfolio_id)}
 
 
-@app.post("/api/transactions/upload")
+@app.post("/api/transactions/upload", response_model=ImportSummaryOut)
 async def upload_transactions(
     file: UploadFile = File(...),
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
@@ -161,7 +175,7 @@ async def upload_transactions(
     }
 
 
-@app.get("/api/transactions")
+@app.get("/api/transactions", response_model=list[TransactionOut])
 def list_transactions(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
@@ -169,14 +183,14 @@ def list_transactions(
     return load_transactions(db, portfolio_id=portfolio_id)
 
 
-@app.put("/api/market/prices")
+@app.put("/api/market/prices", response_model=UpdatedCountOut)
 def set_prices(payload: PriceMap, db: Session = Depends(get_db)) -> dict[str, object]:
     for ticker, price in payload.prices.items():
         upsert_market_price(db, symbol=ticker, close=price, source="manual")
     return {"updated": len(payload.prices)}
 
 
-@app.get("/api/market/{ticker}")
+@app.get("/api/market/{ticker}", response_model=MarketQuoteOut)
 def get_market_quote(ticker: str, db: Session = Depends(get_db)) -> dict[str, object]:
     try:
         quote = YFinanceMarketDataProvider().quote(ticker)
@@ -201,7 +215,7 @@ def get_market_quote(ticker: str, db: Session = Depends(get_db)) -> dict[str, ob
     }
 
 
-@app.put("/api/market/history")
+@app.put("/api/market/history", response_model=UpdatedCountOut)
 def set_market_price_history(payload: MarketPriceHistoryIn, db: Session = Depends(get_db)) -> dict[str, object]:
     points = [
         MarketPriceHistoryPoint(
@@ -221,7 +235,7 @@ def set_market_price_history(payload: MarketPriceHistoryIn, db: Session = Depend
     return {"updated": upsert_market_price_history_many(db, points)}
 
 
-@app.get("/api/market/history/{ticker}")
+@app.get("/api/market/history/{ticker}", response_model=list[MarketPriceHistoryPointOut])
 def get_market_price_history(
     ticker: str,
     start_date: date | None = None,
@@ -241,7 +255,7 @@ def get_market_price_history(
     ]
 
 
-@app.post("/api/market/history/backfill")
+@app.post("/api/market/history/backfill", response_model=MarketHistoryBackfillOut)
 def backfill_market_price_history(
     payload: MarketHistoryBackfillRequest,
     db: Session = Depends(get_db),
@@ -286,7 +300,7 @@ def backfill_market_price_history(
     }
 
 
-@app.get("/api/portfolio")
+@app.get("/api/portfolio", response_model=PortfolioSummaryOut)
 def get_portfolio(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
@@ -294,7 +308,7 @@ def get_portfolio(
     return summarize_portfolio(load_transactions(db, portfolio_id=portfolio_id), get_market_prices(db))
 
 
-@app.get("/api/portfolio/history")
+@app.get("/api/portfolio/history", response_model=list[PortfolioHistoryPointOut])
 def get_portfolio_history(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     start_date: date | None = None,
@@ -323,7 +337,7 @@ def get_portfolio_history(
     ]
 
 
-@app.get("/api/dca/settings")
+@app.get("/api/dca/settings", response_model=DcaSettingsOut)
 def get_dca_settings(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
@@ -331,7 +345,7 @@ def get_dca_settings(
     return _dca_settings_payload(load_dca_settings(db, portfolio_id=portfolio_id), portfolio_id)
 
 
-@app.put("/api/dca/settings")
+@app.put("/api/dca/settings", response_model=DcaSettingsOut)
 def set_dca_settings(payload: DcaSettingsIn, db: Session = Depends(get_db)) -> dict[str, object]:
     if payload.min_multiplier > payload.max_multiplier:
         raise HTTPException(status_code=400, detail="min_multiplier must be less than or equal to max_multiplier.")
@@ -349,7 +363,7 @@ def set_dca_settings(payload: DcaSettingsIn, db: Session = Depends(get_db)) -> d
     return _dca_settings_payload(record, payload.portfolio_id)
 
 
-@app.post("/api/dca/recommendation")
+@app.post("/api/dca/recommendation", response_model=DcaRecommendationOut)
 def get_dca_recommendation(payload: DcaRequest, db: Session = Depends(get_db)) -> object:
     settings = load_dca_settings(db, portfolio_id=payload.portfolio_id)
     benchmark_symbol = (payload.benchmark_symbol or settings.preferred_benchmark).upper()
