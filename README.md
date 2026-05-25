@@ -52,6 +52,7 @@ docs/TESTING.md
 |   `-- fortuneo_transactions_sample.csv
 `-- tests/
     |-- fixtures/                       # synthetic golden CSV/JSON data
+    |-- test_api_routes.py              # FastAPI route tests
     |-- test_fixtures.py                # fixture validation
     |-- test_repositories.py
     `-- test_services.py
@@ -166,6 +167,7 @@ Covered behavior:
 - portfolio history and benchmark normalization.
 - persisted DCA settings.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
+- FastAPI route contracts for uploads, portfolio summaries, market history, DCA settings, and validation errors.
 
 ## CSV Import Format
 

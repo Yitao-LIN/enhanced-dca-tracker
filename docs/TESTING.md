@@ -46,10 +46,17 @@ Purpose:
 - verify portfolio history and benchmark normalization.
 - verify yfinance historical response normalization.
 - verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
+- verify FastAPI route contracts, response-model serialization, upload behavior, portfolio summaries, market history, DCA settings, and validation errors.
 
 Expected output:
 
 ```text
+test_dca_settings_and_recommendation_routes ... ok
+test_health_and_reference_routes ... ok
+test_invalid_csv_upload_returns_bad_request ... ok
+test_market_history_and_portfolio_history_match_golden_fixture ... ok
+test_portfolio_summary_matches_golden_fixture ... ok
+test_upload_transactions_skips_duplicates_and_lists_accounts ... ok
 test_import_allows_same_security_with_different_quantity ... ok
 test_import_skips_duplicate_transactions ... ok
 test_keeps_portfolios_isolated ... ok
@@ -67,7 +74,7 @@ test_duplicate_preview_fixture_marks_duplicate_rows ... ok
 test_golden_fixture_matches_expected_portfolio_history ... ok
 test_golden_fixture_matches_expected_summary ... ok
 
-Ran 16 tests
+Ran 22 tests
 
 OK
 ```
@@ -465,12 +472,34 @@ tests/test_fixtures.py
 
 Update the expected JSON files whenever intentional business logic changes alter cost basis, cash flow, portfolio history, duplicate detection, or preview payloads.
 
+## API Route Tests
+
+The route-level tests live in:
+
+```text
+tests/test_api_routes.py
+```
+
+Purpose:
+
+- call FastAPI endpoints through `TestClient` instead of calling services directly;
+- use an isolated in-memory SQLite database by overriding the `get_db` dependency;
+- verify response-model serialization for `Decimal`, `date`, and `datetime` fields;
+- exercise the golden CSV upload, duplicate-safe re-upload, account listing, price updates, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV error path.
+
+Run these after changing:
+
+- `backend/app/main.py`;
+- `backend/app/schemas.py`;
+- API request or response payloads used by the frontend;
+- database dependency wiring used by routes.
+
 ## Current Baseline
 
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 16 tests, OK
+Automated tests: 22 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works
