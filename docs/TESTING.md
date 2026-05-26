@@ -46,16 +46,19 @@ Purpose:
 - verify portfolio history and benchmark normalization.
 - verify yfinance historical response normalization.
 - verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
-- verify FastAPI route contracts, response-model serialization, upload behavior, portfolio summaries, market history, DCA settings, and validation errors.
+- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, market history, DCA settings, and validation errors.
 
 Expected output:
 
 ```text
 test_dca_settings_and_recommendation_routes ... ok
 test_health_and_reference_routes ... ok
+test_invalid_csv_preview_returns_row_errors_without_bad_request ... ok
 test_invalid_csv_upload_returns_bad_request ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
 test_portfolio_summary_matches_golden_fixture ... ok
+test_preview_golden_csv_matches_fixture_without_persisting ... ok
+test_preview_marks_duplicate_rows_and_existing_transactions ... ok
 test_upload_transactions_skips_duplicates_and_lists_accounts ... ok
 test_duplicate_preview_fixture_marks_duplicate_rows ... ok
 test_golden_fixture_matches_expected_portfolio_history ... ok
@@ -74,7 +77,7 @@ test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_build_portfolio_history_with_normalized_benchmarks ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 22 tests
+Ran 25 tests
 
 OK
 ```
@@ -453,7 +456,7 @@ Purpose:
 
 - provide stable Fortuneo-style CSV data without using private real transactions;
 - cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, and benchmark prices;
-- give future API response schema, route, and import-preview tests exact expected outputs.
+- give API response schema, route, and import-preview tests exact expected outputs.
 
 Key files:
 
@@ -485,7 +488,7 @@ Purpose:
 - call FastAPI endpoints through `TestClient` instead of calling services directly;
 - use an isolated in-memory SQLite database by overriding the `get_db` dependency;
 - verify response-model serialization for `Decimal`, `date`, and `datetime` fields;
-- exercise the golden CSV upload, duplicate-safe re-upload, account listing, price updates, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV error path.
+- exercise the golden CSV preview/upload, duplicate-safe re-upload, account listing, price updates, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV error paths.
 
 Run these after changing:
 
@@ -499,7 +502,7 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 22 tests, OK
+Automated tests: 25 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works

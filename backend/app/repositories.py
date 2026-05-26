@@ -497,6 +497,10 @@ def transaction_fingerprint(transaction: Transaction) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
+def existing_transaction_fingerprints(db: Session, portfolio_id: str, fingerprints: list[str]) -> set[str]:
+    return _existing_fingerprints(db, _normalize_slug(portfolio_id), fingerprints)
+
+
 def _normalize_slug(value: str | None) -> str:
     raw_value = value or DEFAULT_PORTFOLIO_ID
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", raw_value.strip().lower()).strip("-")

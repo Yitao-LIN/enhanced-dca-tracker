@@ -17,6 +17,7 @@ from app.repositories import (
     count_transactions,
     create_portfolio,
     ensure_account,
+    existing_transaction_fingerprints,
     get_dca_settings as load_dca_settings,
     get_market_prices,
     import_transactions,
@@ -25,6 +26,7 @@ from app.repositories import (
     list_portfolios as load_portfolios,
     list_transactions as load_transactions,
     MarketPriceHistoryPoint,
+    transaction_fingerprint,
     upsert_dca_settings,
     upsert_market_price,
     upsert_market_price_history_many,
@@ -37,6 +39,7 @@ from app.schemas import (
     DcaSettingsIn,
     DcaSettingsOut,
     HealthOut,
+    ImportPreviewOut,
     ImportSummaryOut,
     MarketHistoryBackfillOut,
     MarketHistoryBackfillRequest,
@@ -53,7 +56,7 @@ from app.schemas import (
     TransactionOut,
     UpdatedCountOut,
 )
-from app.services.csv_import import parse_transactions_csv
+from app.services.csv_import import preview_transactions_csv, parse_transactions_csv
 from app.services.dca import calculate_enhanced_dca
 from app.services.market_data import DEFAULT_BENCHMARKS, YFinanceMarketDataProvider
 from app.services.portfolio import summarize_portfolio
@@ -172,6 +175,54 @@ async def upload_transactions(
         "imported": summary.imported_count,
         "duplicates": summary.duplicate_count,
         "total": summary.total_count,
+    }
+
+
+@app.post("/api/transactions/preview", response_model=ImportPreviewOut, response_model_exclude_none=True)
+async def preview_transactions(
+    file: UploadFile = File(...),
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    content = await file.read()
+    preview_rows = preview_transactions_csv(content)
+    fingerprints = [
+        transaction_fingerprint(row.transaction)
+        for row in preview_rows
+        if row.transaction is not None
+    ]
+    existing_fingerprints = existing_transaction_fingerprints(db, portfolio_id, fingerprints)
+    seen_in_file: set[str] = set()
+    rows = []
+    valid_count = 0
+    duplicate_count = 0
+    error_count = 0
+
+    for row in preview_rows:
+        if row.transaction is None:
+            error_count += 1
+            rows.append({"row_number": row.row_number, "status": "invalid", "error": row.error})
+            continue
+
+        valid_count += 1
+        fingerprint = transaction_fingerprint(row.transaction)
+        if fingerprint in seen_in_file:
+            status = "duplicate_in_file"
+            duplicate_count += 1
+        elif fingerprint in existing_fingerprints:
+            status = "duplicate_existing"
+            duplicate_count += 1
+        else:
+            status = "new"
+        seen_in_file.add(fingerprint)
+        rows.append(_import_preview_row_payload(row.row_number, status, row.transaction))
+
+    return {
+        "row_count": len(preview_rows),
+        "valid_count": valid_count,
+        "duplicate_count": duplicate_count,
+        "error_count": error_count,
+        "rows": rows,
     }
 
 
@@ -392,6 +443,22 @@ def _portfolio_payload(record: object) -> dict[str, object]:
         "name": record.name,
         "base_currency": record.base_currency,
         "created_at": record.created_at,
+    }
+
+
+def _import_preview_row_payload(row_number: int, status: str, transaction: Transaction) -> dict[str, object]:
+    return {
+        "row_number": row_number,
+        "status": status,
+        "transaction_date": transaction.transaction_date,
+        "transaction_type": transaction.transaction_type.value,
+        "ticker": transaction.ticker,
+        "quantity": transaction.quantity,
+        "price": transaction.price,
+        "fees": transaction.fees,
+        "currency": transaction.currency,
+        "account": transaction.account,
+        "description": transaction.description,
     }
 
 

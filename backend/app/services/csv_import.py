@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 import io
 import re
 import unicodedata
@@ -87,6 +88,13 @@ TYPE_ALIASES = {
 }
 
 
+@dataclass(frozen=True)
+class CsvPreviewRow:
+    row_number: int
+    transaction: Transaction | None = None
+    error: str | None = None
+
+
 def parse_transactions_csv(raw_csv: str | bytes) -> list[Transaction]:
     text = _decode_csv(raw_csv)
     dialect = _sniff_dialect(text)
@@ -101,6 +109,29 @@ def parse_transactions_csv(raw_csv: str | bytes) -> list[Transaction]:
             continue
         transactions.append(_parse_row(row, header_map, row_number))
     return transactions
+
+
+def preview_transactions_csv(raw_csv: str | bytes) -> list[CsvPreviewRow]:
+    text = _decode_csv(raw_csv)
+    dialect = _sniff_dialect(text)
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    if not reader.fieldnames:
+        return []
+
+    try:
+        header_map = _map_headers(reader.fieldnames)
+    except ValueError as exc:
+        return [CsvPreviewRow(row_number=1, error=str(exc))]
+
+    rows = []
+    for row_number, row in enumerate(reader, start=2):
+        if not any(value and value.strip() for value in row.values()):
+            continue
+        try:
+            rows.append(CsvPreviewRow(row_number=row_number, transaction=_parse_row(row, header_map, row_number)))
+        except ValueError as exc:
+            rows.append(CsvPreviewRow(row_number=row_number, error=str(exc)))
+    return rows
 
 
 def _decode_csv(raw_csv: str | bytes) -> str:

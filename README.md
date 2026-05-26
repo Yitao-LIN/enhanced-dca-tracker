@@ -132,6 +132,7 @@ GET    /api/accounts
 POST   /api/accounts
 GET    /api/transactions
 POST   /api/transactions
+POST   /api/transactions/preview
 POST   /api/transactions/upload
 PUT    /api/market/prices
 GET    /api/market/{ticker}
@@ -168,7 +169,7 @@ Covered behavior:
 - portfolio history and benchmark normalization.
 - persisted DCA settings.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
-- FastAPI route contracts for uploads, portfolio summaries, market history, DCA settings, and validation errors.
+- FastAPI route contracts for previews, uploads, portfolio summaries, market history, DCA settings, and validation errors.
 
 ## CSV Import Format
 
@@ -214,7 +215,7 @@ If volatility is high and the recommendation is already increasing contributions
 
 ## Next Build Steps
 
-1. Add import preview before saving Fortuneo CSV rows.
+1. Connect the frontend CSV flow to the import preview endpoint before saving rows.
 2. Add richer analytics for allocation drift, contributions, and benchmark comparison.
 3. Add authentication once local portfolio persistence is working.
 4. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.

@@ -76,6 +76,7 @@ GET    /api/accounts
 POST   /api/accounts
 GET    /api/transactions
 POST   /api/transactions
+POST   /api/transactions/preview
 POST   /api/transactions/upload
 PUT    /api/market/prices
 GET    /api/market/{ticker}
@@ -164,6 +165,7 @@ Current response schemas include:
 PortfolioOut
 AccountOut
 TransactionOut
+ImportPreviewOut
 ImportSummaryOut
 MarketPriceHistoryPointOut
 PortfolioSummaryOut
@@ -584,6 +586,37 @@ Upload responses include an import summary:
 }
 ```
 
+CSV preview:
+
+```text
+Frontend or API client
+  -> POST /api/transactions/preview?portfolio_id=default
+    -> preview_transactions_csv()
+      -> row-level parsed transactions or errors
+        -> transaction_fingerprint()
+        -> existing_transaction_fingerprints()
+        -> statuses: new, duplicate_in_file, duplicate_existing, invalid
+        -> no database writes
+```
+
+Preview responses include row-level statuses:
+
+```json
+{
+  "row_count": 3,
+  "valid_count": 3,
+  "duplicate_count": 1,
+  "error_count": 0,
+  "rows": [
+    {
+      "row_number": 3,
+      "status": "duplicate_in_file",
+      "ticker": "CW8.PA"
+    }
+  ]
+}
+```
+
 Portfolio summary:
 
 ```text
@@ -685,9 +718,9 @@ The current architecture is a good foundation, but still early.
 
 Important next pieces:
 
-- import preview before saving;
+- frontend import review UI before saving;
 - richer allocation drift and contribution analytics;
 - broader route coverage as new API endpoints are added;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to add import preview before saving real Fortuneo CSV rows.
+The best next technical step is probably to connect the frontend CSV flow to the backend import preview endpoint before saving real Fortuneo CSV rows.

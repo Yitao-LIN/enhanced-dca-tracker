@@ -141,6 +141,29 @@ class ImportSummaryOut(ApiModel):
     total: int
 
 
+class ImportPreviewRowOut(ApiModel):
+    row_number: int
+    status: Literal["new", "duplicate_in_file", "duplicate_existing", "invalid"]
+    transaction_date: date | None = None
+    transaction_type: str | None = None
+    ticker: str | None = None
+    quantity: Decimal | None = None
+    price: Decimal | None = None
+    fees: Decimal | None = None
+    currency: str | None = None
+    account: str | None = None
+    description: str | None = None
+    error: str | None = None
+
+
+class ImportPreviewOut(ApiModel):
+    row_count: int
+    valid_count: int
+    duplicate_count: int
+    error_count: int
+    rows: list[ImportPreviewRowOut]
+
+
 class UpdatedCountOut(ApiModel):
     updated: int
 

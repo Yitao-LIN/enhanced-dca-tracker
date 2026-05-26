@@ -83,6 +83,36 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(accounts.status_code, 200)
         self.assertEqual([account["name"] for account in accounts.json()], ["CTO", "PEA"])
 
+    def test_preview_golden_csv_matches_fixture_without_persisting(self):
+        expected = load_json("expected_import_preview.json")
+
+        preview = self._preview_golden_csv()
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json(), {key: value for key, value in expected.items() if key != "source_csv"})
+
+        transactions = self.client.get("/api/transactions?portfolio_id=default")
+        self.assertEqual(transactions.status_code, 200)
+        self.assertEqual(transactions.json(), [])
+
+    def test_preview_marks_duplicate_rows_and_existing_transactions(self):
+        expected_duplicate_rows = load_json("expected_duplicate_preview.json")
+
+        duplicate_preview = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("fortuneo_duplicate_rows.csv", load_fixture_bytes("fortuneo_duplicate_rows.csv"), "text/csv")},
+        )
+        self.assertEqual(duplicate_preview.status_code, 200)
+        self.assertEqual(
+            duplicate_preview.json(),
+            {key: value for key, value in expected_duplicate_rows.items() if key != "source_csv"},
+        )
+
+        self._upload_golden_csv()
+        existing_preview = self._preview_golden_csv()
+        self.assertEqual(existing_preview.status_code, 200)
+        self.assertEqual(existing_preview.json()["duplicate_count"], 8)
+        self.assertEqual({row["status"] for row in existing_preview.json()["rows"]}, {"duplicate_existing"})
+
     def test_portfolio_summary_matches_golden_fixture(self):
         expected = load_json("expected_portfolio_summary.json")
         market_history = load_json("market_history_basic.json")
@@ -174,9 +204,29 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("CSV is missing required columns", response.json()["detail"])
 
+    def test_invalid_csv_preview_returns_row_errors_without_bad_request(self):
+        response = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("bad.csv", b"Operation;Code valeur\nAchat;CW8.PA\n", "text/csv")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["row_count"], 1)
+        self.assertEqual(response.json()["valid_count"], 0)
+        self.assertEqual(response.json()["duplicate_count"], 0)
+        self.assertEqual(response.json()["error_count"], 1)
+        self.assertEqual(response.json()["rows"][0]["status"], "invalid")
+        self.assertIn("CSV is missing required columns", response.json()["rows"][0]["error"])
+
     def _upload_golden_csv(self):
         return self.client.post(
             "/api/transactions/upload?portfolio_id=default",
+            files={"file": ("fortuneo_golden.csv", load_fixture_bytes("fortuneo_golden.csv"), "text/csv")},
+        )
+
+    def _preview_golden_csv(self):
+        return self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
             files={"file": ("fortuneo_golden.csv", load_fixture_bytes("fortuneo_golden.csv"), "text/csv")},
         )
 
