@@ -44,7 +44,7 @@ It can:
 - import a CSV file in the browser;
 - connect to the FastAPI backend at `http://127.0.0.1:8000`;
 - load portfolios, accounts, and portfolio summaries from the API;
-- upload Fortuneo CSV files through the backend import endpoint;
+- preview Fortuneo CSV rows through the backend before confirming import;
 - save manually edited market prices through the API;
 - compute holdings locally;
 - let the user manually edit current market prices;
@@ -551,7 +551,7 @@ Keeps the synthetic golden fixture dataset aligned with parser, portfolio summar
 tests/test_api_routes.py
 ```
 
-Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover upload, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, upload, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
 
 ## Current Data Flows
 
@@ -723,4 +723,4 @@ Important next pieces:
 - broader route coverage as new API endpoints are added;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to connect the frontend CSV flow to the backend import preview endpoint before saving real Fortuneo CSV rows.
+The best next technical step is probably to add richer row-level import handling for real Fortuneo CSV variants.

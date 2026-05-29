@@ -55,6 +55,16 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(summary.total_invested, Decimal("200.00"))
         self.assertEqual(summary.total_gain_percent, Decimal("25.00"))
 
+    def test_summarize_empty_portfolio_returns_zeroes(self):
+        summary = summarize_portfolio([], {})
+
+        self.assertEqual(summary.total_value, Decimal("0.00"))
+        self.assertEqual(summary.total_invested, Decimal("0.00"))
+        self.assertEqual(summary.total_gain, Decimal("0.00"))
+        self.assertEqual(summary.total_gain_percent, Decimal("0"))
+        self.assertEqual(summary.cash_flow, Decimal("0.00"))
+        self.assertEqual(summary.holdings, [])
+
     def test_build_portfolio_history_with_normalized_benchmarks(self):
         transactions = [
             Transaction(

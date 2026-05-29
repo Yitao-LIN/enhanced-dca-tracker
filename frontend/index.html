@@ -192,6 +192,69 @@
         color: var(--amber);
       }
 
+      .summary-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .mini-stat {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px;
+        background: var(--surface-soft);
+      }
+
+      .mini-stat strong {
+        display: block;
+        font-size: 16px;
+        line-height: 1.2;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        border-radius: 999px;
+        padding: 0 8px;
+        border: 1px solid var(--line);
+        background: var(--surface-soft);
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .badge.new {
+        border-color: rgba(47, 107, 63, 0.25);
+        background: #eef7f0;
+        color: var(--green);
+      }
+
+      .badge.duplicate {
+        border-color: rgba(148, 99, 15, 0.25);
+        background: #fff7e8;
+        color: var(--amber);
+      }
+
+      .badge.invalid {
+        border-color: rgba(161, 59, 59, 0.25);
+        background: #fff0f0;
+        color: var(--red);
+      }
+
+      .preview-table {
+        max-height: 260px;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        margin-top: 12px;
+      }
+
+      .preview-table table {
+        min-width: 760px;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -303,7 +366,8 @@
       @media (max-width: 920px) {
         .metrics,
         .workbench,
-        .controls {
+        .controls,
+        .summary-row {
           grid-template-columns: 1fr;
         }
 
@@ -494,6 +558,23 @@
         return { adjusted, multiplier, reason };
       }
 
+      function statusLabel(status) {
+        const labels = {
+          new: "New",
+          duplicate_in_file: "Duplicate",
+          duplicate_existing: "Existing",
+          invalid: "Invalid",
+        };
+        return labels[status] || status;
+      }
+
+      function statusClass(status) {
+        if (status === "new") return "new";
+        if (status === "invalid") return "invalid";
+        if (status && status.startsWith("duplicate")) return "duplicate";
+        return "";
+      }
+
       function LineChart({ data }) {
         const width = 820;
         const height = 270;
@@ -561,6 +642,8 @@
         const [baseAmount, setBaseAmount] = useState(1000);
         const [marketChange, setMarketChange] = useState(-2.3);
         const [volatility, setVolatility] = useState(18.5);
+        const [importPreview, setImportPreview] = useState(null);
+        const [pendingImportFile, setPendingImportFile] = useState(null);
         const [status, setStatus] = useState("Demo mode loaded. Start FastAPI on port 8000 to sync with the backend.");
 
         const demoHoldings = useMemo(() => buildHoldings(transactions, prices), [transactions, prices]);
@@ -571,6 +654,9 @@
         const totalGain = apiAvailable ? toNumber(apiSummary.total_gain) : totalValue - totalInvested;
         const totalGainPercent = apiAvailable ? toNumber(apiSummary.total_gain_percent) : totalInvested ? (totalGain / totalInvested) * 100 : 0;
         const dca = apiDca || calculateDca(baseAmount, marketChange, volatility);
+        const previewRows = importPreview?.rows || [];
+        const previewNewRows = previewRows.filter((row) => row.status === "new").length;
+        const canConfirmImport = apiAvailable && pendingImportFile && importPreview && importPreview.error_count === 0 && previewNewRows > 0 && !apiLoading;
 
         const history = useMemo(() => {
           if (apiAvailable && portfolioHistory.length) {
@@ -599,6 +685,7 @@
 
         useEffect(() => {
           if (apiAvailable) {
+            clearImportPreview();
             refreshBackendData(selectedPortfolioId);
           }
         }, [selectedPortfolioId]);
@@ -732,14 +819,17 @@
             formData.append("file", file);
             setApiLoading(true);
             try {
-              const summary = await apiRequest(`/api/transactions/upload?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+              const preview = await apiRequest(`/api/transactions/preview?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
                 method: "POST",
                 body: formData,
               });
-              await refreshBackendData(selectedPortfolioId);
-              setStatus(`Imported ${summary.imported} row(s), skipped ${summary.duplicates} duplicate(s) from ${file.name}.`);
+              setPendingImportFile(file);
+              setImportPreview(preview);
+              const newRows = (preview.rows || []).filter((row) => row.status === "new").length;
+              setStatus(`Reviewed ${preview.row_count} row(s) from ${file.name}: ${newRows} new, ${preview.duplicate_count} duplicate(s), ${preview.error_count} error(s).`);
             } catch (error) {
-              setStatus(`Import failed: ${error.message}`);
+              clearImportPreview();
+              setStatus(`Preview failed: ${error.message}`);
             } finally {
               setApiLoading(false);
               event.target.value = "";
@@ -750,6 +840,32 @@
             setTransactions(parsed);
             setStatus(`Imported ${parsed.length} transaction rows from ${file.name} in demo mode.`);
           }
+        }
+
+        async function confirmImport() {
+          if (!canConfirmImport) return;
+          const file = pendingImportFile;
+          const formData = new FormData();
+          formData.append("file", file);
+          setApiLoading(true);
+          try {
+            const summary = await apiRequest(`/api/transactions/upload?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+              method: "POST",
+              body: formData,
+            });
+            clearImportPreview();
+            await refreshBackendData(selectedPortfolioId);
+            setStatus(`Imported ${summary.imported} row(s), skipped ${summary.duplicates} duplicate(s) from ${file.name}.`);
+          } catch (error) {
+            setStatus(`Import failed: ${error.message}`);
+          } finally {
+            setApiLoading(false);
+          }
+        }
+
+        function clearImportPreview() {
+          setImportPreview(null);
+          setPendingImportFile(null);
         }
 
         function updatePrice(ticker, value) {
@@ -789,7 +905,7 @@
               <div className="actions">
                 <span className="pill">{apiAvailable ? "Backend connected" : "Demo mode"}</span>
                 <button disabled={apiLoading} onClick={connectBackend}>{apiAvailable ? "Sync API" : "Connect API"}</button>
-                <button onClick={() => { setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setStatus("Demo data restored."); }}>Demo data</button>
+                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setStatus("Demo data restored."); }}>Demo data</button>
                 <button className="primary" onClick={simulateMarket}>Refresh market simulation</button>
               </div>
             </header>
@@ -899,6 +1015,62 @@
                     <label htmlFor="csv">CSV file</label>
                     <input className="file" id="csv" type="file" accept=".csv,text/csv" disabled={apiLoading} onChange={importFile} />
                   </div>
+                  {apiAvailable && importPreview && (
+                    <div>
+                      <div className="summary-row">
+                        <div className="mini-stat">
+                          <span className="label">Rows</span>
+                          <strong>{importPreview.row_count}</strong>
+                        </div>
+                        <div className="mini-stat">
+                          <span className="label">New</span>
+                          <strong className="positive">{previewNewRows}</strong>
+                        </div>
+                        <div className="mini-stat">
+                          <span className="label">Duplicates</span>
+                          <strong className="warning">{importPreview.duplicate_count}</strong>
+                        </div>
+                        <div className="mini-stat">
+                          <span className="label">Errors</span>
+                          <strong className={importPreview.error_count ? "negative" : ""}>{importPreview.error_count}</strong>
+                        </div>
+                      </div>
+                      <div className="preview-table">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Row</th>
+                              <th>Status</th>
+                              <th>Date</th>
+                              <th>Ticker</th>
+                              <th>Type</th>
+                              <th className="num">Qty</th>
+                              <th className="num">Price</th>
+                              <th>Account</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {previewRows.map((row) => (
+                              <tr key={row.row_number}>
+                                <td>{row.row_number}</td>
+                                <td><span className={`badge ${statusClass(row.status)}`}>{statusLabel(row.status)}</span></td>
+                                <td>{row.transaction_date || "-"}</td>
+                                <td><strong>{row.ticker || "-"}</strong></td>
+                                <td>{row.transaction_type || "-"}</td>
+                                <td className="num">{row.quantity ?? "-"}</td>
+                                <td className="num">{row.price ?? "-"}</td>
+                                <td>{row.account || row.error || "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="actions" style={{ marginTop: 12 }}>
+                        <button className="primary" disabled={!canConfirmImport} onClick={confirmImport}>Confirm import</button>
+                        <button disabled={apiLoading} onClick={clearImportPreview}>Clear</button>
+                      </div>
+                    </div>
+                  )}
                   <p className="status">{status}</p>
                 </div>
 

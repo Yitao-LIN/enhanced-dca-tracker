@@ -60,10 +60,16 @@ def build_holdings(transactions: list[Transaction]) -> list[Holding]:
 def summarize_portfolio(transactions: list[Transaction], current_prices: dict[str, Decimal]) -> PortfolioSummary:
     holdings = build_holdings(transactions)
     total_value = sum(
-        quantize_money(holding.quantity * current_prices.get(holding.ticker, holding.average_cost))
-        for holding in holdings
+        (
+            quantize_money(holding.quantity * current_prices.get(holding.ticker, holding.average_cost))
+            for holding in holdings
+        ),
+        Decimal("0"),
     )
-    total_invested = sum(holding.invested_amount for holding in holdings)
+    total_invested = sum(
+        (holding.invested_amount for holding in holdings),
+        Decimal("0"),
+    )
 
     priced_holdings = []
     for holding in holdings:
@@ -89,7 +95,7 @@ def summarize_portfolio(transactions: list[Transaction], current_prices: dict[st
 
     total_gain = quantize_money(total_value - total_invested)
     total_gain_percent = Decimal("0") if total_invested == 0 else quantize_money((total_gain / total_invested) * Decimal("100"))
-    cash_flow = sum(transaction.cash_impact for transaction in transactions)
+    cash_flow = sum((transaction.cash_impact for transaction in transactions), Decimal("0"))
 
     return PortfolioSummary(
         total_value=quantize_money(total_value),

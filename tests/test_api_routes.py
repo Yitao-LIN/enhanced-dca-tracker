@@ -59,6 +59,22 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(len(portfolios.json()), 1)
         self.assertEqual(portfolios.json()[0]["id"], "default")
 
+    def test_empty_portfolio_summary_returns_zeroes(self):
+        response = self.client.get("/api/portfolio?portfolio_id=default")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "total_value": "0.00",
+                "total_invested": "0.00",
+                "total_gain": "0.00",
+                "total_gain_percent": "0",
+                "cash_flow": "0.00",
+                "holdings": [],
+            },
+        )
+
     def test_upload_transactions_skips_duplicates_and_lists_accounts(self):
         first_upload = self._upload_golden_csv()
         self.assertEqual(first_upload.status_code, 200)

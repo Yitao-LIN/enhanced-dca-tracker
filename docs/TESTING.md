@@ -382,13 +382,19 @@ Purpose:
 - verify the browser can load the standalone frontend;
 - verify CORS allows the frontend to talk to the backend;
 - verify the page can connect to `/api/health`, `/api/portfolios`, `/api/accounts`, and `/api/portfolio`;
-- verify CSV upload uses the backend when connected.
+- verify CSV preview and confirmed upload use the backend when connected.
 
 Expected page behavior:
 
 - top-right status shows `Backend connected`;
 - import panel shows `Default Portfolio`;
-- CSV upload status says something like:
+- choosing the sample CSV shows a preview status like:
+
+```text
+Reviewed 4 row(s) from fortuneo_transactions_sample.csv: 4 new, 0 duplicate(s), 0 error(s).
+```
+
+- clicking `Confirm import` then shows something like:
 
 ```text
 Imported 4 row(s), skipped 0 duplicate(s) from fortuneo_transactions_sample.csv.
