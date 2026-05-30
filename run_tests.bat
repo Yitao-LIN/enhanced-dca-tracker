@@ -80,7 +80,7 @@ echo [CMD] "%ALEMBIC%" -c "%BACKEND_DIR%\alembic.ini" upgrade head
 if errorlevel 1 goto :fail
 
 echo [CMD] Inspect migration revision and expected tables
-"%PYTHON%" -c "import os, sqlite3; expected={'accounts','alembic_version','dca_settings','import_sessions','market_price_history','market_prices','portfolios','transaction_fingerprints','transactions'}; con=sqlite3.connect(os.environ['TEST_DB_PATH']); version=con.execute('select version_num from alembic_version').fetchone(); tables=[row[0] for row in con.execute('select name from sqlite_master where type=? order by name', ('table',))]; missing=sorted(expected-set(tables)); print('alembic_version =', version); print('tables = ' + ', '.join(tables)); print('missing tables = ' + (', '.join(missing) if missing else 'none')); raise SystemExit(1 if missing or not version else 0)" 2>&1
+"%PYTHON%" -c "import os, sqlite3; expected={'accounts','alembic_version','dca_settings','import_sessions','market_price_history','market_prices','portfolios','security_mappings','transaction_fingerprints','transactions'}; con=sqlite3.connect(os.environ['TEST_DB_PATH']); version=con.execute('select version_num from alembic_version').fetchone(); tables=[row[0] for row in con.execute('select name from sqlite_master where type=? order by name', ('table',))]; missing=sorted(expected-set(tables)); print('alembic_version =', version); print('tables = ' + ', '.join(tables)); print('missing tables = ' + (', '.join(missing) if missing else 'none')); raise SystemExit(1 if missing or not version else 0)" 2>&1
 if errorlevel 1 goto :fail
 echo [PASS] Alembic migration smoke test completed.
 

@@ -8,7 +8,7 @@ import unicodedata
 import zipfile
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from app.domain import Transaction, TransactionType
 
@@ -103,9 +103,20 @@ class CsvPreviewRow:
     row_number: int
     transaction: Transaction | None = None
     error: str | None = None
+    security_label: str | None = None
 
 
-def parse_transactions_csv(raw_csv: str | bytes) -> list[Transaction]:
+class SecurityMappingRequired(ValueError):
+    def __init__(self, row_number: int, security_label: str) -> None:
+        self.row_number = row_number
+        self.security_label = security_label
+        super().__init__(f"Row {row_number}: security {security_label!r} needs a ticker mapping before import")
+
+
+def parse_transactions_csv(
+    raw_csv: str | bytes,
+    security_mappings: Mapping[str, str] | None = None,
+) -> list[Transaction]:
     text = _extract_csv_text(raw_csv)
     dialect = _sniff_dialect(text)
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
@@ -117,11 +128,14 @@ def parse_transactions_csv(raw_csv: str | bytes) -> list[Transaction]:
     for row_number, row in enumerate(reader, start=2):
         if not any(value and value.strip() for value in row.values()):
             continue
-        transactions.append(_parse_row(row, header_map, row_number))
+        transactions.append(_parse_row(row, header_map, row_number, security_mappings))
     return transactions
 
 
-def preview_transactions_csv(raw_csv: str | bytes) -> list[CsvPreviewRow]:
+def preview_transactions_csv(
+    raw_csv: str | bytes,
+    security_mappings: Mapping[str, str] | None = None,
+) -> list[CsvPreviewRow]:
     try:
         text = _extract_csv_text(raw_csv)
     except ValueError as exc:
@@ -141,7 +155,14 @@ def preview_transactions_csv(raw_csv: str | bytes) -> list[CsvPreviewRow]:
         if not any(value and value.strip() for value in row.values()):
             continue
         try:
-            rows.append(CsvPreviewRow(row_number=row_number, transaction=_parse_row(row, header_map, row_number)))
+            rows.append(
+                CsvPreviewRow(
+                    row_number=row_number,
+                    transaction=_parse_row(row, header_map, row_number, security_mappings),
+                )
+            )
+        except SecurityMappingRequired as exc:
+            rows.append(CsvPreviewRow(row_number=row_number, security_label=exc.security_label, error=str(exc)))
         except ValueError as exc:
             rows.append(CsvPreviewRow(row_number=row_number, error=str(exc)))
     return rows
@@ -201,9 +222,14 @@ def _map_headers(fieldnames: Iterable[str]) -> dict[str, str]:
     return mapped
 
 
-def _parse_row(row: dict[str, str], header_map: dict[str, str], row_number: int) -> Transaction:
+def _parse_row(
+    row: dict[str, str],
+    header_map: dict[str, str],
+    row_number: int,
+    security_mappings: Mapping[str, str] | None = None,
+) -> Transaction:
     transaction_type = _parse_transaction_type(_value(row, header_map, "type"), row_number)
-    ticker = _parse_ticker(row, header_map, row_number)
+    ticker = _parse_ticker(row, header_map, row_number, security_mappings)
     quantity = _parse_decimal(_value(row, header_map, "quantity"), default=Decimal("0"))
     price = _parse_decimal(_value(row, header_map, "price"), default=Decimal("0"))
     amount = _parse_decimal(_value(row, header_map, "amount"), default=None)
@@ -238,21 +264,40 @@ def _value(row: dict[str, str], header_map: dict[str, str], canonical: str) -> s
     return "" if value is None else str(value).strip()
 
 
-def _parse_ticker(row: dict[str, str], header_map: dict[str, str], row_number: int) -> str:
+def _parse_ticker(
+    row: dict[str, str],
+    header_map: dict[str, str],
+    row_number: int,
+    security_mappings: Mapping[str, str] | None = None,
+) -> str:
     ticker = _value(row, header_map, "ticker").strip()
     if ticker:
         return ticker.upper()
 
     label = _value(row, header_map, "description").strip()
     if label:
-        raise ValueError(
-            f"Row {row_number}: security {label!r} has no ticker/security code; "
-            "add a Code valeur, ISIN, ticker, or symbol column before import"
-        )
+        mapped_ticker = _mapped_ticker(label, security_mappings)
+        if mapped_ticker:
+            return mapped_ticker
+        raise SecurityMappingRequired(row_number, label)
     raise ValueError(
         f"Row {row_number}: CSV row has no ticker/security code; "
         "add a Code valeur, ISIN, ticker, or symbol column before import"
     )
+
+
+def _mapped_ticker(label: str, security_mappings: Mapping[str, str] | None) -> str | None:
+    if not security_mappings:
+        return None
+    ticker = security_mappings.get(normalize_security_label(label)) or security_mappings.get(label)
+    if ticker is None:
+        return None
+    ticker = str(ticker).strip().upper()
+    return ticker or None
+
+
+def normalize_security_label(value: str) -> str:
+    return _normalize_header(value)
 
 
 def _normalize_header(value: str) -> str:

@@ -17,9 +17,11 @@ from app.models import (
     MarketPriceRecord,
     MarketPriceHistoryRecord,
     PortfolioRecord,
+    SecurityMappingRecord,
     TransactionFingerprintRecord,
     TransactionRecord,
 )
+from app.services.csv_import import normalize_security_label
 
 
 DEFAULT_PORTFOLIO_ID = "default"
@@ -63,6 +65,17 @@ class DcaSettings:
     min_multiplier: Decimal = Decimal("0.7")
     max_multiplier: Decimal = Decimal("1.5")
     contribution_frequency: str = "monthly"
+
+
+@dataclass(frozen=True)
+class SecurityMapping:
+    security_label: str
+    ticker: str
+    provider: str = "manual"
+    provider_name: str | None = None
+    provider_exchange: str | None = None
+    provider_quote_type: str | None = None
+    provider_currency: str | None = None
 
 
 def ensure_portfolio(
@@ -155,6 +168,86 @@ def list_accounts(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> list
         .order_by(AccountRecord.name)
     )
     return list(db.scalars(statement))
+
+
+def get_security_mapping_symbols(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> dict[str, str]:
+    return {
+        record.normalized_label: record.ticker
+        for record in list_security_mappings(db, portfolio_id=portfolio_id)
+    }
+
+
+def list_security_mappings(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> list[SecurityMappingRecord]:
+    slug = _normalize_slug(portfolio_id)
+    portfolio = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
+    if portfolio is None:
+        return []
+    statement = (
+        select(SecurityMappingRecord)
+        .where(SecurityMappingRecord.portfolio_record_id == portfolio.id)
+        .order_by(SecurityMappingRecord.display_label)
+    )
+    return list(db.scalars(statement))
+
+
+def upsert_security_mapping(
+    db: Session,
+    mapping: SecurityMapping,
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    commit: bool = True,
+) -> SecurityMappingRecord:
+    portfolio = ensure_portfolio(db, portfolio_id)
+    display_label = mapping.security_label.strip()
+    normalized_label = normalize_security_label(display_label)
+    if not normalized_label:
+        raise ValueError("Security label is required.")
+    ticker = mapping.ticker.strip().upper()
+    if not ticker:
+        raise ValueError("Ticker is required.")
+
+    statement = select(SecurityMappingRecord).where(
+        SecurityMappingRecord.portfolio_record_id == portfolio.id,
+        SecurityMappingRecord.normalized_label == normalized_label,
+    )
+    record = db.scalar(statement)
+    if record is None:
+        record = SecurityMappingRecord(
+            portfolio_record_id=portfolio.id,
+            normalized_label=normalized_label,
+            display_label=display_label,
+            ticker=ticker,
+        )
+        db.add(record)
+
+    record.display_label = display_label
+    record.ticker = ticker
+    record.provider = (mapping.provider or "manual").strip().lower()
+    record.provider_name = _normalize_optional_text(mapping.provider_name)
+    record.provider_exchange = _normalize_optional_text(mapping.provider_exchange)
+    record.provider_quote_type = _normalize_optional_text(mapping.provider_quote_type)
+    record.provider_currency = _normalize_optional_text(mapping.provider_currency)
+    if record.provider_currency is not None:
+        record.provider_currency = record.provider_currency.upper()
+
+    if commit:
+        db.commit()
+        db.refresh(record)
+    return record
+
+
+def upsert_security_mappings(
+    db: Session,
+    mappings: list[SecurityMapping],
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+) -> list[SecurityMappingRecord]:
+    records = [
+        upsert_security_mapping(db, mapping, portfolio_id=portfolio_id, commit=False)
+        for mapping in mappings
+    ]
+    db.commit()
+    for record in records:
+        db.refresh(record)
+    return records
 
 
 def bootstrap_reference_data(db: Session) -> None:

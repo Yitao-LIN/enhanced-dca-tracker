@@ -75,6 +75,30 @@ class ImportSessionRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class SecurityMappingRecord(Base):
+    __tablename__ = "security_mappings"
+    __table_args__ = (
+        UniqueConstraint("portfolio_record_id", "normalized_label", name="uq_security_mappings_portfolio_label"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_record_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), index=True)
+    normalized_label: Mapped[str] = mapped_column(String(255), index=True)
+    display_label: Mapped[str] = mapped_column(String(255))
+    ticker: Mapped[str] = mapped_column(String(32), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="manual")
+    provider_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    provider_exchange: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_quote_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class MarketPriceRecord(Base):
     __tablename__ = "market_prices"
     __table_args__ = (UniqueConstraint("symbol", name="uq_market_prices_symbol"),)

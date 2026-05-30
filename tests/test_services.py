@@ -9,7 +9,7 @@ import pandas as pd
 from app.domain import Transaction, TransactionType
 from app.services.csv_import import parse_transactions_csv, preview_transactions_csv
 from app.services.dca import calculate_enhanced_dca
-from app.services.market_data import normalize_yfinance_history
+from app.services.market_data import normalize_yfinance_history, normalize_yfinance_search_quotes
 from app.services.portfolio import build_holdings, summarize_portfolio
 from app.services.portfolio_history import build_portfolio_history
 
@@ -61,8 +61,32 @@ class CsvImportTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertIsNone(rows[0].transaction)
+        self.assertEqual(rows[0].security_label, "AMUNDI MSCI WORLD")
         self.assertIn("AMUNDI MSCI WORLD", rows[0].error)
-        self.assertIn("Code valeur", rows[0].error)
+        self.assertIn("needs a ticker mapping", rows[0].error)
+
+    def test_parse_fortuneo_bourse_with_security_mapping(self):
+        csv_text = (
+            "libell\u00e9;Op\u00e9ration;Place;Date;Qt\u00e9;Prix d'\u00e9x\u00e9;Montant brut;"
+            "Courtage/Pr\u00e9l\u00e8vement;Montant net;Devise;\n"
+            "AMUNDI MSCI WORLD;Achat comptant;Paris;15/01/2026;3;470,50;"
+            "1411,50;1,95;-1413,45;EUR;\n"
+        )
+
+        transactions = parse_transactions_csv(csv_text, security_mappings={"amundi msci world": "cw8.pa"})
+
+        self.assertEqual(len(transactions), 1)
+        self.assertEqual(transactions[0].ticker, "CW8.PA")
+        self.assertEqual(transactions[0].description, "AMUNDI MSCI WORLD")
+
+    def test_existing_security_code_wins_over_mapping(self):
+        csv_text = """Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Libelle
+15/01/2026;Achat;EWLD.PA;3;32,50;1,95;EUR;AMUNDI MSCI WORLD
+"""
+
+        transactions = parse_transactions_csv(csv_text, security_mappings={"amundi msci world": "CW8.PA"})
+
+        self.assertEqual(transactions[0].ticker, "EWLD.PA")
 
     def test_parse_zip_without_fortuneo_csv_fails_clearly(self):
         archive = io.BytesIO()
@@ -162,6 +186,26 @@ class DcaTests(unittest.TestCase):
 
 
 class MarketDataTests(unittest.TestCase):
+    def test_normalize_yfinance_search_quotes(self):
+        quotes = [
+            {
+                "symbol": "cw8.pa",
+                "longname": "Amundi MSCI World UCITS ETF",
+                "exchange": "PAR",
+                "quoteType": "ETF",
+                "currency": "eur",
+            },
+            {"symbol": "CW8.PA", "shortname": "Duplicate"},
+            {"shortname": "No symbol"},
+        ]
+
+        results = normalize_yfinance_search_quotes(quotes)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].symbol, "CW8.PA")
+        self.assertEqual(results[0].name, "Amundi MSCI World UCITS ETF")
+        self.assertEqual(results[0].currency, "EUR")
+
     def test_normalize_yfinance_history(self):
         frame = pd.DataFrame(
             {

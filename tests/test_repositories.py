@@ -90,6 +90,46 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual([transaction.ticker for transaction in long_term], ["CW8.PA"])
         self.assertEqual([transaction.ticker for transaction in default], ["EWLD.PA"])
 
+    def test_security_mappings_are_persisted_per_portfolio(self):
+        from app.repositories import (
+            SecurityMapping,
+            create_portfolio,
+            get_security_mapping_symbols,
+            list_security_mappings,
+            upsert_security_mapping,
+        )
+
+        with self.Session() as db:
+            create_portfolio(db, name="Long Term", slug="long-term")
+            default_record = upsert_security_mapping(
+                db,
+                SecurityMapping(
+                    security_label="AMUNDI MSCI WORLD",
+                    ticker="cw8.pa",
+                    provider="yfinance",
+                    provider_name="Amundi MSCI World UCITS ETF",
+                    provider_exchange="PAR",
+                    provider_quote_type="ETF",
+                    provider_currency="eur",
+                ),
+            )
+            long_term_record = upsert_security_mapping(
+                db,
+                SecurityMapping(security_label="AMUNDI MSCI WORLD", ticker="WRD.PA"),
+                portfolio_id="long-term",
+            )
+            default_mappings = get_security_mapping_symbols(db)
+            long_term_mappings = get_security_mapping_symbols(db, portfolio_id="long-term")
+            listed = list_security_mappings(db)
+
+        self.assertEqual(default_record.ticker, "CW8.PA")
+        self.assertEqual(default_record.provider, "yfinance")
+        self.assertEqual(default_record.provider_currency, "EUR")
+        self.assertEqual(long_term_record.ticker, "WRD.PA")
+        self.assertEqual(default_mappings, {"amundi msci world": "CW8.PA"})
+        self.assertEqual(long_term_mappings, {"amundi msci world": "WRD.PA"})
+        self.assertEqual([record.display_label for record in listed], ["AMUNDI MSCI WORLD"])
+
     def test_import_skips_duplicate_transactions(self):
         from app.domain import Transaction, TransactionType
         from app.repositories import import_transactions, list_transactions

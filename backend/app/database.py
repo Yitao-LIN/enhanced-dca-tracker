@@ -71,6 +71,7 @@ def _needs_legacy_baseline_stamp() -> bool:
         "market_price_history",
         "market_prices",
         "portfolios",
+        "security_mappings",
         "transaction_fingerprints",
         "transactions",
     }

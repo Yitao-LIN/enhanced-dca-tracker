@@ -68,6 +68,16 @@ class MarketHistoryBackfillRequest(BaseModel):
     source: str = "yfinance"
 
 
+class SecurityMappingIn(BaseModel):
+    security_label: str
+    ticker: str
+    provider: str = "manual"
+    provider_name: str | None = None
+    provider_exchange: str | None = None
+    provider_quote_type: str | None = None
+    provider_currency: str | None = None
+
+
 class PortfolioHistoryRequest(BaseModel):
     portfolio_id: str = "default"
     start_date: date | None = None
@@ -141,9 +151,19 @@ class ImportSummaryOut(ApiModel):
     total: int
 
 
+class SymbolSearchCandidateOut(ApiModel):
+    symbol: str
+    name: str | None = None
+    exchange: str | None = None
+    quote_type: str | None = None
+    currency: str | None = None
+    score: float | None = None
+    source: str
+
+
 class ImportPreviewRowOut(ApiModel):
     row_number: int
-    status: Literal["new", "duplicate_in_file", "duplicate_existing", "invalid"]
+    status: Literal["new", "duplicate_in_file", "duplicate_existing", "invalid", "needs_mapping"]
     transaction_date: date | None = None
     transaction_type: str | None = None
     ticker: str | None = None
@@ -154,6 +174,9 @@ class ImportPreviewRowOut(ApiModel):
     account: str | None = None
     description: str | None = None
     error: str | None = None
+    security_label: str | None = None
+    suggestions: list[SymbolSearchCandidateOut] | None = None
+    search_error: str | None = None
 
 
 class ImportPreviewOut(ApiModel):
@@ -161,6 +184,7 @@ class ImportPreviewOut(ApiModel):
     valid_count: int
     duplicate_count: int
     error_count: int
+    mapping_count: int | None = None
     rows: list[ImportPreviewRowOut]
 
 

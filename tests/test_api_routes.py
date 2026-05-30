@@ -9,7 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
-from app.main import app
+from app.main import app, get_symbol_search_provider
+from app.services.market_data import SymbolSearchResult
 import app.models as models  # noqa: F401
 
 
@@ -22,6 +23,29 @@ def load_json(name):
 
 def load_fixture_bytes(name):
     return (FIXTURES_DIR / name).read_bytes()
+
+
+def fortuneo_bourse_without_code_bytes():
+    csv_text = (
+        "libell\u00e9;Op\u00e9ration;Place;Date;Qt\u00e9;Prix d'\u00e9x\u00e9;Montant brut;"
+        "Courtage/Pr\u00e9l\u00e8vement;Montant net;Devise;\n"
+        "AMUNDI MSCI WORLD;Achat comptant;Paris;15/01/2026;3;470,50;"
+        "1411,50;1,95;-1413,45;EUR;\n"
+    )
+    return csv_text.encode("iso-8859-1")
+
+
+class StubSearchProvider:
+    def __init__(self, results=None, error: Exception | None = None):
+        self.results = results or []
+        self.error = error
+        self.queries = []
+
+    def search_symbols(self, query: str, limit: int = 5):
+        self.queries.append((query, limit))
+        if self.error is not None:
+            raise self.error
+        return self.results[:limit]
 
 
 class ApiRouteTests(unittest.TestCase):
@@ -233,6 +257,97 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["error_count"], 1)
         self.assertEqual(response.json()["rows"][0]["status"], "invalid")
         self.assertIn("CSV is missing required columns", response.json()["rows"][0]["error"])
+
+    def test_preview_returns_mapping_suggestions_for_unresolved_fortuneo_label(self):
+        provider = StubSearchProvider(
+            [
+                SymbolSearchResult(
+                    symbol="CW8.PA",
+                    name="Amundi MSCI World UCITS ETF",
+                    exchange="PAR",
+                    quote_type="ETF",
+                    currency="EUR",
+                    score=5,
+                    source="yfinance",
+                )
+            ]
+        )
+        app.dependency_overrides[get_symbol_search_provider] = lambda: provider
+
+        response = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("fortuneo_bourse.csv", fortuneo_bourse_without_code_bytes(), "text/csv")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["row_count"], 1)
+        self.assertEqual(payload["valid_count"], 0)
+        self.assertEqual(payload["error_count"], 0)
+        self.assertEqual(payload["mapping_count"], 1)
+        self.assertEqual(payload["rows"][0]["status"], "needs_mapping")
+        self.assertEqual(payload["rows"][0]["security_label"], "AMUNDI MSCI WORLD")
+        self.assertEqual(payload["rows"][0]["suggestions"][0]["symbol"], "CW8.PA")
+        self.assertEqual(provider.queries, [("AMUNDI MSCI WORLD", 5)])
+
+    def test_upload_persists_confirmed_mapping_and_reuses_it(self):
+        mapping_payload = [
+            {
+                "security_label": "AMUNDI MSCI WORLD",
+                "ticker": "CW8.PA",
+                "provider": "yfinance",
+                "provider_name": "Amundi MSCI World UCITS ETF",
+                "provider_exchange": "PAR",
+                "provider_quote_type": "ETF",
+                "provider_currency": "EUR",
+            }
+        ]
+
+        upload = self.client.post(
+            "/api/transactions/upload?portfolio_id=default",
+            files={"file": ("fortuneo_bourse.csv", fortuneo_bourse_without_code_bytes(), "text/csv")},
+            data={"mappings": json.dumps(mapping_payload)},
+        )
+        self.assertEqual(upload.status_code, 200)
+        self.assertEqual(upload.json()["imported"], 1)
+
+        transactions = self.client.get("/api/transactions?portfolio_id=default")
+        self.assertEqual(transactions.status_code, 200)
+        self.assertEqual(transactions.json()[0]["ticker"], "CW8.PA")
+        self.assertEqual(transactions.json()[0]["description"], "AMUNDI MSCI WORLD")
+
+        app.dependency_overrides[get_symbol_search_provider] = lambda: StubSearchProvider(error=RuntimeError("offline"))
+        preview = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("fortuneo_bourse.csv", fortuneo_bourse_without_code_bytes(), "text/csv")},
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["rows"][0]["status"], "duplicate_existing")
+        self.assertNotIn("mapping_count", preview.json())
+
+    def test_preview_keeps_mapping_row_editable_when_search_fails(self):
+        app.dependency_overrides[get_symbol_search_provider] = lambda: StubSearchProvider(error=RuntimeError("search offline"))
+
+        response = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("fortuneo_bourse.csv", fortuneo_bourse_without_code_bytes(), "text/csv")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["rows"][0]
+        self.assertEqual(row["status"], "needs_mapping")
+        self.assertEqual(row["suggestions"], [])
+        self.assertIn("search offline", row["search_error"])
+
+    def test_security_search_route_uses_provider(self):
+        app.dependency_overrides[get_symbol_search_provider] = lambda: StubSearchProvider(
+            [SymbolSearchResult(symbol="CW8.PA", name="Amundi MSCI World UCITS ETF", source="yfinance")]
+        )
+
+        response = self.client.get("/api/securities/search?query=AMUNDI%20MSCI%20WORLD")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["symbol"], "CW8.PA")
 
     def _upload_golden_csv(self):
         return self.client.post(

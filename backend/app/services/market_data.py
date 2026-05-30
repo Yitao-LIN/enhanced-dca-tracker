@@ -27,6 +27,17 @@ class HistoricalMarketPrice:
     source: str = "yfinance"
 
 
+@dataclass(frozen=True)
+class SymbolSearchResult:
+    symbol: str
+    name: str | None = None
+    exchange: str | None = None
+    quote_type: str | None = None
+    currency: str | None = None
+    score: float | None = None
+    source: str = "yfinance"
+
+
 class MarketDataProvider:
     def quote(self, symbol: str) -> MarketSnapshot:
         raise NotImplementedError
@@ -65,6 +76,28 @@ class YFinanceMarketDataProvider(MarketDataProvider):
             currency=currency,
         )
 
+    def search_symbols(self, query: str, limit: int = 5) -> list[SymbolSearchResult]:
+        try:
+            import yfinance as yf
+        except ImportError as exc:
+            raise RuntimeError("Install yfinance to use symbol search.") from exc
+        if not hasattr(yf, "Search"):
+            raise RuntimeError("Upgrade yfinance to a version with Search support.")
+
+        search = yf.Search(
+            query,
+            max_results=limit,
+            news_count=0,
+            lists_count=0,
+            include_cb=False,
+            include_nav_links=False,
+            include_research=False,
+            include_cultural_assets=False,
+            timeout=10,
+            raise_errors=True,
+        )
+        return normalize_yfinance_search_quotes(search.quotes, limit=limit)
+
     def historical_prices(
         self,
         symbol: str,
@@ -95,6 +128,38 @@ class YFinanceMarketDataProvider(MarketDataProvider):
             currency=currency,
             source=source,
         )
+
+
+def normalize_yfinance_search_quotes(quotes: list[dict[str, object]], limit: int = 5) -> list[SymbolSearchResult]:
+    results: list[SymbolSearchResult] = []
+    seen_symbols: set[str] = set()
+    for index, quote in enumerate(quotes):
+        raw_symbol = quote.get("symbol")
+        if raw_symbol is None:
+            continue
+        symbol = str(raw_symbol).strip().upper()
+        if not symbol or symbol in seen_symbols:
+            continue
+        seen_symbols.add(symbol)
+        results.append(
+            SymbolSearchResult(
+                symbol=symbol,
+                name=_optional_text(
+                    quote.get("longname")
+                    or quote.get("shortname")
+                    or quote.get("displayName")
+                    or quote.get("name")
+                ),
+                exchange=_optional_text(quote.get("exchange")),
+                quote_type=_optional_text(quote.get("quoteType")),
+                currency=_optional_text(quote.get("currency"), upper=True),
+                score=_optional_float(quote.get("score"), default=float(max(limit - index, 0))),
+                source="yfinance",
+            )
+        )
+        if len(results) >= limit:
+            break
+    return results
 
 
 def normalize_yfinance_history(
@@ -132,10 +197,28 @@ def _optional_decimal(value: object) -> Decimal | None:
     return Decimal(str(value))
 
 
+def _optional_float(value: object, default: float | None = None) -> float | None:
+    if value is None or value != value:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _optional_int(value: object) -> int | None:
     if value is None or value != value:
         return None
     return int(value)
+
+
+def _optional_text(value: object, upper: bool = False) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text.upper() if upper else text
 
 
 def _single_symbol_history_frame(symbol: str, history: object) -> object:

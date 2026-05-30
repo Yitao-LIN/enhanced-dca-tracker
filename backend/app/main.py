@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db, initialize_database
@@ -20,16 +22,19 @@ from app.repositories import (
     existing_transaction_fingerprints,
     get_dca_settings as load_dca_settings,
     get_market_prices,
+    get_security_mapping_symbols,
     import_transactions,
     list_market_price_history,
     list_accounts as load_accounts,
     list_portfolios as load_portfolios,
     list_transactions as load_transactions,
     MarketPriceHistoryPoint,
+    SecurityMapping,
     transaction_fingerprint,
     upsert_dca_settings,
     upsert_market_price,
     upsert_market_price_history_many,
+    upsert_security_mappings,
 )
 from app.schemas import (
     AccountIn,
@@ -51,6 +56,8 @@ from app.schemas import (
     PortfolioOut,
     PortfolioSummaryOut,
     PriceMap,
+    SecurityMappingIn,
+    SymbolSearchCandidateOut,
     TransactionCreateOut,
     TransactionIn,
     TransactionOut,
@@ -79,6 +86,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def get_symbol_search_provider() -> YFinanceMarketDataProvider:
+    return YFinanceMarketDataProvider()
 
 
 @app.on_event("startup")
@@ -150,12 +161,17 @@ def add_transaction(payload: TransactionIn, db: Session = Depends(get_db)) -> di
 @app.post("/api/transactions/upload", response_model=ImportSummaryOut)
 async def upload_transactions(
     file: UploadFile = File(...),
+    mappings: str | None = Form(default=None),
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     try:
         content = await file.read()
-        imported = parse_transactions_csv(content)
+        submitted_mappings = _parse_security_mappings_form(mappings)
+        if submitted_mappings:
+            upsert_security_mappings(db, submitted_mappings, portfolio_id=portfolio_id)
+        security_mappings = get_security_mapping_symbols(db, portfolio_id=portfolio_id)
+        imported = parse_transactions_csv(content, security_mappings=security_mappings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -183,9 +199,11 @@ async def preview_transactions(
     file: UploadFile = File(...),
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
+    search_provider: YFinanceMarketDataProvider = Depends(get_symbol_search_provider),
 ) -> dict[str, object]:
     content = await file.read()
-    preview_rows = preview_transactions_csv(content)
+    security_mappings = get_security_mapping_symbols(db, portfolio_id=portfolio_id)
+    preview_rows = preview_transactions_csv(content, security_mappings=security_mappings)
     fingerprints = [
         transaction_fingerprint(row.transaction)
         for row in preview_rows
@@ -197,8 +215,25 @@ async def preview_transactions(
     valid_count = 0
     duplicate_count = 0
     error_count = 0
+    mapping_count = 0
+    suggestion_cache: dict[str, tuple[list[dict[str, object]], str | None]] = {}
 
     for row in preview_rows:
+        if row.security_label is not None:
+            mapping_count += 1
+            suggestions, search_error = _search_suggestions(row.security_label, suggestion_cache, search_provider)
+            rows.append(
+                {
+                    "row_number": row.row_number,
+                    "status": "needs_mapping",
+                    "security_label": row.security_label,
+                    "error": row.error,
+                    "suggestions": suggestions,
+                    "search_error": search_error,
+                }
+            )
+            continue
+
         if row.transaction is None:
             error_count += 1
             rows.append({"row_number": row.row_number, "status": "invalid", "error": row.error})
@@ -217,13 +252,16 @@ async def preview_transactions(
         seen_in_file.add(fingerprint)
         rows.append(_import_preview_row_payload(row.row_number, status, row.transaction))
 
-    return {
+    payload = {
         "row_count": len(preview_rows),
         "valid_count": valid_count,
         "duplicate_count": duplicate_count,
         "error_count": error_count,
         "rows": rows,
     }
+    if mapping_count:
+        payload["mapping_count"] = mapping_count
+    return payload
 
 
 @app.get("/api/transactions", response_model=list[TransactionOut])
@@ -232,6 +270,18 @@ def list_transactions(
     db: Session = Depends(get_db),
 ) -> list[Transaction]:
     return load_transactions(db, portfolio_id=portfolio_id)
+
+
+@app.get("/api/securities/search", response_model=list[SymbolSearchCandidateOut])
+def search_securities(
+    query: str,
+    limit: int = 5,
+    search_provider: YFinanceMarketDataProvider = Depends(get_symbol_search_provider),
+) -> list[dict[str, object]]:
+    try:
+        return [_symbol_search_payload(result) for result in search_provider.search_symbols(query, limit=limit)]
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.put("/api/market/prices", response_model=UpdatedCountOut)
@@ -460,6 +510,71 @@ def _import_preview_row_payload(row_number: int, status: str, transaction: Trans
         "account": transaction.account,
         "description": transaction.description,
     }
+
+
+def _search_suggestions(
+    security_label: str,
+    suggestion_cache: dict[str, tuple[list[dict[str, object]], str | None]],
+    search_provider: YFinanceMarketDataProvider,
+) -> tuple[list[dict[str, object]], str | None]:
+    if security_label in suggestion_cache:
+        return suggestion_cache[security_label]
+    try:
+        suggestions = [_symbol_search_payload(result) for result in search_provider.search_symbols(security_label, limit=5)]
+        search_error = None
+    except Exception as exc:
+        suggestions = []
+        search_error = str(exc)
+    suggestion_cache[security_label] = (suggestions, search_error)
+    return suggestions, search_error
+
+
+def _symbol_search_payload(result: object) -> dict[str, object]:
+    return {
+        "symbol": result.symbol,
+        "name": result.name,
+        "exchange": result.exchange,
+        "quote_type": result.quote_type,
+        "currency": result.currency,
+        "score": result.score,
+        "source": result.source,
+    }
+
+
+def _parse_security_mappings_form(raw_mappings: str | None) -> list[SecurityMapping]:
+    if not raw_mappings:
+        return []
+    try:
+        data = json.loads(raw_mappings)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Import mappings must be valid JSON.") from exc
+
+    if isinstance(data, dict):
+        data = [
+            {"security_label": security_label, "ticker": ticker}
+            for security_label, ticker in data.items()
+        ]
+    if not isinstance(data, list):
+        raise ValueError("Import mappings must be a JSON array or object.")
+
+    parsed: list[SecurityMapping] = []
+    try:
+        for item in data:
+            payload = SecurityMappingIn.model_validate(item)
+            parsed.append(
+                SecurityMapping(
+                    security_label=payload.security_label,
+                    ticker=payload.ticker,
+                    provider=payload.provider,
+                    provider_name=payload.provider_name,
+                    provider_exchange=payload.provider_exchange,
+                    provider_quote_type=payload.provider_quote_type,
+                    provider_currency=payload.provider_currency,
+                )
+            )
+    except ValidationError as exc:
+        raise ValueError(f"Import mappings are invalid: {exc}") from exc
+    return parsed
 
 
 def _account_payload(record: object | None) -> dict[str, object]:
