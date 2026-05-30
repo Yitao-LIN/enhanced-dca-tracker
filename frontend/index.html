@@ -194,7 +194,7 @@
 
       .summary-row {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 8px;
         margin-top: 12px;
       }
@@ -243,6 +243,12 @@
         color: var(--red);
       }
 
+      .badge.mapping {
+        border-color: rgba(24, 95, 165, 0.25);
+        background: #edf5fc;
+        color: var(--blue);
+      }
+
       .preview-table {
         max-height: 260px;
         overflow: auto;
@@ -252,7 +258,30 @@
       }
 
       .preview-table table {
-        min-width: 760px;
+        min-width: 980px;
+      }
+
+      .mapping-cell {
+        min-width: 260px;
+        white-space: normal;
+      }
+
+      .mapping-cell strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .mapping-controls {
+        display: grid;
+        grid-template-columns: minmax(120px, 1fr) auto;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .mapping-note {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 6px;
       }
 
       table {
@@ -564,6 +593,7 @@
           duplicate_in_file: "Duplicate",
           duplicate_existing: "Existing",
           invalid: "Invalid",
+          needs_mapping: "Map",
         };
         return labels[status] || status;
       }
@@ -571,6 +601,7 @@
       function statusClass(status) {
         if (status === "new") return "new";
         if (status === "invalid") return "invalid";
+        if (status === "needs_mapping") return "mapping";
         if (status && status.startsWith("duplicate")) return "duplicate";
         return "";
       }
@@ -644,6 +675,7 @@
         const [volatility, setVolatility] = useState(18.5);
         const [importPreview, setImportPreview] = useState(null);
         const [pendingImportFile, setPendingImportFile] = useState(null);
+        const [mappingSelections, setMappingSelections] = useState({});
         const [status, setStatus] = useState("Demo mode loaded. Start FastAPI on port 8000 to sync with the backend.");
 
         const demoHoldings = useMemo(() => buildHoldings(transactions, prices), [transactions, prices]);
@@ -656,7 +688,10 @@
         const dca = apiDca || calculateDca(baseAmount, marketChange, volatility);
         const previewRows = importPreview?.rows || [];
         const previewNewRows = previewRows.filter((row) => row.status === "new").length;
-        const canConfirmImport = apiAvailable && pendingImportFile && importPreview && importPreview.error_count === 0 && previewNewRows > 0 && !apiLoading;
+        const previewMappingRows = previewRows.filter((row) => row.status === "needs_mapping");
+        const confirmedMappingRows = previewMappingRows.filter((row) => isMappingConfirmed(row));
+        const unresolvedMappingCount = previewMappingRows.length - confirmedMappingRows.length;
+        const canConfirmImport = apiAvailable && pendingImportFile && importPreview && importPreview.error_count === 0 && unresolvedMappingCount === 0 && (previewNewRows > 0 || confirmedMappingRows.length > 0) && !apiLoading;
 
         const history = useMemo(() => {
           if (apiAvailable && portfolioHistory.length) {
@@ -689,6 +724,103 @@
             refreshBackendData(selectedPortfolioId);
           }
         }, [selectedPortfolioId]);
+
+        function mappingKey(row) {
+          return row.security_label || `row-${row.row_number}`;
+        }
+
+        function initialMappingSelections(preview) {
+          const selections = {};
+          (preview?.rows || []).forEach((row) => {
+            if (row.status !== "needs_mapping") return;
+            const suggestion = (row.suggestions || [])[0];
+            selections[mappingKey(row)] = {
+              ticker: suggestion?.symbol || "",
+              confirmed: false,
+            };
+          });
+          return selections;
+        }
+
+        function mappingSelection(row) {
+          return mappingSelections[mappingKey(row)] || {
+            ticker: (row.suggestions || [])[0]?.symbol || "",
+            confirmed: false,
+          };
+        }
+
+        function isMappingConfirmed(row) {
+          const selection = mappingSelection(row);
+          return Boolean(selection.confirmed && String(selection.ticker || "").trim());
+        }
+
+        function updateMappingTicker(row, ticker) {
+          const key = mappingKey(row);
+          setMappingSelections((current) => ({
+            ...current,
+            [key]: { ticker: String(ticker || "").toUpperCase(), confirmed: false },
+          }));
+        }
+
+        function confirmMapping(row) {
+          const key = mappingKey(row);
+          const selection = mappingSelection(row);
+          const ticker = String(selection.ticker || "").trim().toUpperCase();
+          if (!ticker) return;
+          setMappingSelections((current) => ({
+            ...current,
+            [key]: { ticker, confirmed: true },
+          }));
+        }
+
+        function confirmedMappingsPayload() {
+          return previewMappingRows
+            .filter((row) => isMappingConfirmed(row))
+            .map((row) => {
+              const selection = mappingSelection(row);
+              const ticker = String(selection.ticker || "").trim().toUpperCase();
+              const suggestion = (row.suggestions || []).find((item) => item.symbol === ticker);
+              return {
+                security_label: row.security_label,
+                ticker,
+                provider: suggestion?.source || "manual",
+                provider_name: suggestion?.name || null,
+                provider_exchange: suggestion?.exchange || null,
+                provider_quote_type: suggestion?.quote_type || null,
+                provider_currency: suggestion?.currency || null,
+              };
+            });
+        }
+
+        function renderMappingCell(row) {
+          const selection = mappingSelection(row);
+          const suggestions = row.suggestions || [];
+          const ticker = selection.ticker || "";
+          return (
+            <div className="mapping-cell">
+              <strong>{row.security_label || "-"}</strong>
+              <div className="mapping-controls">
+                <input
+                  type="text"
+                  list={`mapping-suggestions-${row.row_number}`}
+                  value={ticker}
+                  aria-label={`Ticker for ${row.security_label || "security"}`}
+                  onChange={(event) => updateMappingTicker(row, event.target.value)}
+                />
+                <datalist id={`mapping-suggestions-${row.row_number}`}>
+                  {suggestions.map((suggestion) => (
+                    <option key={suggestion.symbol} value={suggestion.symbol} label={[suggestion.name, suggestion.exchange, suggestion.currency].filter(Boolean).join(" - ")} />
+                  ))}
+                </datalist>
+                <button disabled={!String(ticker).trim()} onClick={() => confirmMapping(row)}>
+                  {selection.confirmed ? "Confirmed" : "Confirm"}
+                </button>
+              </div>
+              {row.search_error && <div className="mapping-note negative">{row.search_error}</div>}
+              {selection.confirmed && <div className="mapping-note positive">Mapped to {String(ticker).toUpperCase()}</div>}
+            </div>
+          );
+        }
 
         async function connectBackend() {
           setApiLoading(true);
@@ -825,8 +957,10 @@
               });
               setPendingImportFile(file);
               setImportPreview(preview);
+              setMappingSelections(initialMappingSelections(preview));
               const newRows = (preview.rows || []).filter((row) => row.status === "new").length;
-              setStatus(`Reviewed ${preview.row_count} row(s) from ${file.name}: ${newRows} new, ${preview.duplicate_count} duplicate(s), ${preview.error_count} error(s).`);
+              const mappingRows = (preview.rows || []).filter((row) => row.status === "needs_mapping").length;
+              setStatus(`Reviewed ${preview.row_count} row(s) from ${file.name}: ${newRows} new, ${mappingRows} mapping(s), ${preview.duplicate_count} duplicate(s), ${preview.error_count} error(s).`);
             } catch (error) {
               clearImportPreview();
               setStatus(`Preview failed: ${error.message}`);
@@ -847,6 +981,10 @@
           const file = pendingImportFile;
           const formData = new FormData();
           formData.append("file", file);
+          const confirmedMappings = confirmedMappingsPayload();
+          if (confirmedMappings.length) {
+            formData.append("mappings", JSON.stringify(confirmedMappings));
+          }
           setApiLoading(true);
           try {
             const summary = await apiRequest(`/api/transactions/upload?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
@@ -866,6 +1004,7 @@
         function clearImportPreview() {
           setImportPreview(null);
           setPendingImportFile(null);
+          setMappingSelections({});
         }
 
         function updatePrice(ticker, value) {
@@ -1013,7 +1152,7 @@
                   )}
                   <div className="drop" style={{ marginTop: 12 }}>
                     <label htmlFor="csv">CSV file</label>
-                    <input className="file" id="csv" type="file" accept=".csv,text/csv" disabled={apiLoading} onChange={importFile} />
+                    <input className="file" id="csv" type="file" accept=".csv,.zip,text/csv,application/zip" disabled={apiLoading} onChange={importFile} />
                   </div>
                   {apiAvailable && importPreview && (
                     <div>
@@ -1025,6 +1164,10 @@
                         <div className="mini-stat">
                           <span className="label">New</span>
                           <strong className="positive">{previewNewRows}</strong>
+                        </div>
+                        <div className="mini-stat">
+                          <span className="label">Mappings</span>
+                          <strong className={unresolvedMappingCount ? "warning" : ""}>{confirmedMappingRows.length}/{previewMappingRows.length}</strong>
                         </div>
                         <div className="mini-stat">
                           <span className="label">Duplicates</span>
@@ -1046,7 +1189,7 @@
                               <th>Type</th>
                               <th className="num">Qty</th>
                               <th className="num">Price</th>
-                              <th>Account</th>
+                              <th>Account / Mapping</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1059,7 +1202,9 @@
                                 <td>{row.transaction_type || "-"}</td>
                                 <td className="num">{row.quantity ?? "-"}</td>
                                 <td className="num">{row.price ?? "-"}</td>
-                                <td>{row.account || row.error || "-"}</td>
+                                <td className={row.status === "needs_mapping" ? "mapping-cell" : ""}>
+                                  {row.status === "needs_mapping" ? renderMappingCell(row) : (row.account || row.error || "-")}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
