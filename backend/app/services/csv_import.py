@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import io
 import re
 import unicodedata
+import zipfile
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
@@ -48,6 +49,8 @@ HEADER_ALIASES = {
         "price",
         "cours",
         "prix",
+        "prix d exe",
+        "prix d execution",
         "prix unitaire",
         "unit price",
     },
@@ -55,11 +58,16 @@ HEADER_ALIASES = {
         "fees",
         "frais",
         "commission",
+        "courtage",
+        "courtage prelevement",
+        "courtage prelevements",
+        "prelevement",
         "brokerage fees",
     },
     "amount": {
         "amount",
         "montant",
+        "montant brut",
         "net amount",
         "montant net",
     },
@@ -79,6 +87,8 @@ HEADER_ALIASES = {
     },
 }
 
+FORTUNEO_ARCHIVE_CSV_RE = re.compile(r"(^|/)HistoriqueOperations.*\.csv$", re.IGNORECASE)
+
 TYPE_ALIASES = {
     TransactionType.BUY: {"buy", "achat", "acheter", "subscription", "souscription"},
     TransactionType.SELL: {"sell", "vente", "vendre", "redemption", "rachat"},
@@ -96,7 +106,7 @@ class CsvPreviewRow:
 
 
 def parse_transactions_csv(raw_csv: str | bytes) -> list[Transaction]:
-    text = _decode_csv(raw_csv)
+    text = _extract_csv_text(raw_csv)
     dialect = _sniff_dialect(text)
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
     if not reader.fieldnames:
@@ -112,7 +122,10 @@ def parse_transactions_csv(raw_csv: str | bytes) -> list[Transaction]:
 
 
 def preview_transactions_csv(raw_csv: str | bytes) -> list[CsvPreviewRow]:
-    text = _decode_csv(raw_csv)
+    try:
+        text = _extract_csv_text(raw_csv)
+    except ValueError as exc:
+        return [CsvPreviewRow(row_number=1, error=str(exc))]
     dialect = _sniff_dialect(text)
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
     if not reader.fieldnames:
@@ -134,9 +147,29 @@ def preview_transactions_csv(raw_csv: str | bytes) -> list[CsvPreviewRow]:
     return rows
 
 
-def _decode_csv(raw_csv: str | bytes) -> str:
+def _extract_csv_text(raw_csv: str | bytes) -> str:
     if isinstance(raw_csv, str):
         return raw_csv
+    if _is_zip_archive(raw_csv):
+        return _extract_fortuneo_archive_csv(raw_csv)
+    return _decode_csv_bytes(raw_csv)
+
+
+def _is_zip_archive(raw_csv: bytes) -> bool:
+    return zipfile.is_zipfile(io.BytesIO(raw_csv))
+
+
+def _extract_fortuneo_archive_csv(raw_csv: bytes) -> str:
+    with zipfile.ZipFile(io.BytesIO(raw_csv)) as archive:
+        for name in archive.namelist():
+            normalized_name = name.replace("\\", "/")
+            if FORTUNEO_ARCHIVE_CSV_RE.search(normalized_name):
+                with archive.open(name) as csv_file:
+                    return _decode_csv_bytes(csv_file.read())
+    raise ValueError("ZIP archive does not contain a Fortuneo HistoriqueOperations CSV file")
+
+
+def _decode_csv_bytes(raw_csv: bytes) -> str:
     for encoding in ("utf-8-sig", "utf-8", "cp1252", "iso-8859-1"):
         try:
             return raw_csv.decode(encoding)
@@ -161,7 +194,7 @@ def _map_headers(fieldnames: Iterable[str]) -> dict[str, str]:
             if alias in normalized:
                 mapped[canonical] = normalized[alias]
                 break
-    required = {"date", "ticker", "type"}
+    required = {"date", "type"}
     missing = sorted(required - mapped.keys())
     if missing:
         raise ValueError(f"CSV is missing required columns: {', '.join(missing)}")
@@ -170,6 +203,7 @@ def _map_headers(fieldnames: Iterable[str]) -> dict[str, str]:
 
 def _parse_row(row: dict[str, str], header_map: dict[str, str], row_number: int) -> Transaction:
     transaction_type = _parse_transaction_type(_value(row, header_map, "type"), row_number)
+    ticker = _parse_ticker(row, header_map, row_number)
     quantity = _parse_decimal(_value(row, header_map, "quantity"), default=Decimal("0"))
     price = _parse_decimal(_value(row, header_map, "price"), default=Decimal("0"))
     amount = _parse_decimal(_value(row, header_map, "amount"), default=None)
@@ -183,7 +217,6 @@ def _parse_row(row: dict[str, str], header_map: dict[str, str], row_number: int)
         price = abs(amount)
         quantity = Decimal("1")
 
-    ticker = _value(row, header_map, "ticker").strip().upper()
     return Transaction(
         transaction_date=_parse_date(_value(row, header_map, "date"), row_number),
         ticker=ticker,
@@ -203,6 +236,23 @@ def _value(row: dict[str, str], header_map: dict[str, str], canonical: str) -> s
         return ""
     value = row.get(source)
     return "" if value is None else str(value).strip()
+
+
+def _parse_ticker(row: dict[str, str], header_map: dict[str, str], row_number: int) -> str:
+    ticker = _value(row, header_map, "ticker").strip()
+    if ticker:
+        return ticker.upper()
+
+    label = _value(row, header_map, "description").strip()
+    if label:
+        raise ValueError(
+            f"Row {row_number}: security {label!r} has no ticker/security code; "
+            "add a Code valeur, ISIN, ticker, or symbol column before import"
+        )
+    raise ValueError(
+        f"Row {row_number}: CSV row has no ticker/security code; "
+        "add a Code valeur, ISIN, ticker, or symbol column before import"
+    )
 
 
 def _normalize_header(value: str) -> str:
@@ -243,6 +293,7 @@ def _parse_date(value: str, row_number: int) -> date:
 def _parse_transaction_type(value: str, row_number: int) -> TransactionType:
     normalized = _normalize_header(value)
     for transaction_type, aliases in TYPE_ALIASES.items():
-        if normalized in aliases:
-            return transaction_type
+        for alias in aliases:
+            if normalized == alias or normalized.startswith(f"{alias} "):
+                return transaction_type
     raise ValueError(f"Row {row_number}: unsupported transaction type {value!r}")
