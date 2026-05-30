@@ -606,6 +606,39 @@
         return "";
       }
 
+      function chartDate(value) {
+        if (!value) return null;
+        const date = new Date(`${value}T00:00:00`);
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+
+      function chartDateLabel(value, rangeDays) {
+        const date = chartDate(value);
+        if (!date) return value;
+        const options = rangeDays <= 90
+          ? { day: "2-digit", month: "short" }
+          : { month: "short", year: "2-digit" };
+        return new Intl.DateTimeFormat("en-GB", options).format(date);
+      }
+
+      function chartRangeDays(data) {
+        const first = chartDate(data[0]?.date);
+        const last = chartDate(data[data.length - 1]?.date);
+        if (!first || !last) return 0;
+        return Math.abs(last - first) / 86400000;
+      }
+
+      function chartTickIndexes(data, maxTicks = 6) {
+        if (data.length <= maxTicks) return data.map((_, index) => index);
+        const lastIndex = data.length - 1;
+        const indexes = new Set([0, lastIndex]);
+        const step = lastIndex / (maxTicks - 1);
+        for (let tick = 1; tick < maxTicks - 1; tick += 1) {
+          indexes.add(Math.round(tick * step));
+        }
+        return Array.from(indexes).sort((a, b) => a - b);
+      }
+
       function LineChart({ data }) {
         const width = 820;
         const height = 270;
@@ -614,12 +647,25 @@
         const values = data.flatMap((item) => series.map((key) => item[key]).filter((value) => Number.isFinite(value)));
         const max = Math.max(...values, 1);
         const min = Math.min(...values, 0);
+        const rangeDays = chartRangeDays(data);
+        const tickIndexes = chartTickIndexes(data);
         const x = (index) => pad + (index / Math.max(data.length - 1, 1)) * (width - pad * 2);
         const y = (value) => height - pad - ((value - min) / (max - min || 1)) * (height - pad * 2);
-        const path = (key) => data
-          .map((item, index) => Number.isFinite(item[key]) ? `${index === 0 ? "M" : "L"}${x(index)},${y(item[key])}` : "")
-          .filter(Boolean)
-          .join(" ");
+        const path = (key) => {
+          let started = false;
+          return data
+            .map((item, index) => {
+              if (!Number.isFinite(item[key])) {
+                started = false;
+                return "";
+              }
+              const command = started ? "L" : "M";
+              started = true;
+              return `${command}${x(index)},${y(item[key])}`;
+            })
+            .filter(Boolean)
+            .join(" ");
+        };
 
         return (
           <div className="chart">
@@ -628,12 +674,14 @@
                 const yy = pad + line * ((height - pad * 2) / 3);
                 return <line key={line} x1={pad} y1={yy} x2={width - pad} y2={yy} stroke="#d8dde5" />;
               })}
-              <path d={path("invested")} fill="none" stroke="#8090a5" strokeWidth="3" />
               <path d={path("value")} fill="none" stroke="#185fa5" strokeWidth="3" />
+              <path d={path("invested")} fill="none" stroke="#8090a5" strokeWidth="2.5" strokeDasharray="6 5" />
               {path("sp500") && <path d={path("sp500")} fill="none" stroke="#1c8c5a" strokeWidth="2.5" strokeDasharray="7 5" />}
               {path("nasdaq100") && <path d={path("nasdaq100")} fill="none" stroke="#b45f06" strokeWidth="2.5" strokeDasharray="4 5" />}
-              {data.map((item, index) => (
-                <text key={item.month} x={x(index)} y={height - 10} textAnchor="middle" fontSize="11" fill="#627083">{item.month}</text>
+              {tickIndexes.map((index) => (
+                <text key={`${data[index]?.date || data[index]?.month}-${index}`} x={x(index)} y={height - 10} textAnchor="middle" fontSize="11" fill="#627083">
+                  {data[index]?.date ? chartDateLabel(data[index].date, rangeDays) : data[index]?.month}
+                </text>
               ))}
             </svg>
           </div>
@@ -696,7 +744,7 @@
         const history = useMemo(() => {
           if (apiAvailable && portfolioHistory.length) {
             return portfolioHistory.map((point) => ({
-              month: String(point.date).slice(5),
+              date: String(point.date),
               invested: toNumber(point.invested_amount),
               value: toNumber(point.market_value),
               sp500: point.benchmarks && point.benchmarks["^GSPC"] !== undefined ? toNumber(point.benchmarks["^GSPC"]) : undefined,
