@@ -173,14 +173,16 @@ Covered behavior:
 
 ## CSV Import Format
 
-The importer accepts common French and English headers. For Fortuneo exports, this shape is supported:
+The importer accepts common French and English headers. It accepts plain CSV files and Fortuneo ZIP exports that contain a `HistoriqueOperations*.csv` file. For Fortuneo-like investment exports, this shape is supported:
 
 ```csv
 Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;Libelle
 15/01/2026;Achat;CW8.PA;3;470,50;1,95;EUR;PEA;Amundi MSCI World
 ```
 
-Required fields are date, operation type, and security identifier. Quantity, price, fees, amount, currency, account, and description are optional or inferred when possible.
+The parser also recognizes real Fortuneo bourse headers such as `Qté`, `Prix d'éxé`, `Courtage/Prélèvement`, `Montant brut`, and `Montant net`.
+
+Required fields are date, operation type, and security identifier. Quantity, price, fees, amount, currency, account, and description are optional or inferred when possible. Some Fortuneo bourse exports provide only a security label in `libellé`; preview returns a row-level mapping error until a `Code valeur`, `ISIN`, `ticker`, or `symbol` column is provided.
 
 CSV uploads return an import summary:
 
@@ -215,7 +217,7 @@ If volatility is high and the recommendation is already increasing contributions
 
 ## Next Build Steps
 
-1. Connect the frontend CSV flow to the import preview endpoint before saving rows.
+1. Add a security-label mapping flow for real Fortuneo bourse exports that do not include ticker-like identifiers.
 2. Add richer analytics for allocation drift, contributions, and benchmark comparison.
 3. Add authentication once local portfolio persistence is working.
 4. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.

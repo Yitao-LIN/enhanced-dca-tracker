@@ -412,11 +412,15 @@ This file parses Fortuneo-like CSV exports.
 
 It handles:
 
+- plain CSV uploads and Fortuneo ZIP exports containing `HistoriqueOperations*.csv`;
 - semicolon and comma delimiters;
 - French number formats such as `470,50`;
 - French headers such as `Date operation`, `Quantite`, `Prix unitaire`, and `Frais`;
-- operation types such as `Achat` and `Vente`;
+- real Fortuneo bourse headers such as `Qté`, `Prix d'éxé`, `Courtage/Prélèvement`, `Montant brut`, and `Montant net`;
+- operation types such as `Achat`, `Vente`, and longer labels such as `Achat comptant`;
 - text encodings such as UTF-8 and Windows `cp1252`.
+
+Security identifiers are still required for import. If a Fortuneo bourse row has only a `libellé` security label, preview returns a row-level error telling the user to provide a `Code valeur`, `ISIN`, ticker, or symbol. This keeps ambiguous real exports visible without silently inventing tickers.
 
 The main function is:
 
@@ -718,9 +722,9 @@ The current architecture is a good foundation, but still early.
 
 Important next pieces:
 
-- frontend import review UI before saving;
+- security-label mapping for real Fortuneo bourse exports that do not include ticker-like identifiers;
 - richer allocation drift and contribution analytics;
 - broader route coverage as new API endpoints are added;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to add richer row-level import handling for real Fortuneo CSV variants.
+The best next technical step is probably to add a user-facing mapping flow for unresolved Fortuneo security labels.

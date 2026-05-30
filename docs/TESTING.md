@@ -52,6 +52,7 @@ Expected output:
 
 ```text
 test_dca_settings_and_recommendation_routes ... ok
+test_empty_portfolio_summary_returns_zeroes ... ok
 test_health_and_reference_routes ... ok
 test_invalid_csv_preview_returns_row_errors_without_bad_request ... ok
 test_invalid_csv_upload_returns_bad_request ... ok
@@ -69,15 +70,19 @@ test_import_skips_duplicate_transactions ... ok
 test_keeps_portfolios_isolated ... ok
 test_market_price_history_upserts_and_filters_ranges ... ok
 test_persists_transactions_and_prices ... ok
+test_parse_fortuneo_bourse_zip_with_enriched_security_code ... ok
 test_parse_fortuneo_style_csv ... ok
+test_parse_zip_without_fortuneo_csv_fails_clearly ... ok
+test_preview_fortuneo_bourse_without_security_code_reports_mapping_error ... ok
 test_enhanced_dca_applies_settings_multiplier_bounds ... ok
 test_enhanced_dca_increases_on_market_drawdown ... ok
 test_normalize_yfinance_history ... ok
 test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_build_portfolio_history_with_normalized_benchmarks ... ok
+test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 25 tests
+Ran 30 tests
 
 OK
 ```
@@ -461,7 +466,7 @@ tests/fixtures/
 Purpose:
 
 - provide stable Fortuneo-style CSV data without using private real transactions;
-- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, and benchmark prices;
+- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, and unmapped security-label preview errors;
 - give API response schema, route, and import-preview tests exact expected outputs.
 
 Key files:
@@ -508,7 +513,7 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 25 tests, OK
+Automated tests: 30 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works
