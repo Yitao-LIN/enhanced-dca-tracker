@@ -134,6 +134,7 @@ GET    /api/transactions
 POST   /api/transactions
 POST   /api/transactions/preview
 POST   /api/transactions/upload
+GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
 PUT    /api/market/history
@@ -146,7 +147,7 @@ PUT    /api/dca/settings
 POST   /api/dca/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, latest market prices, historical market prices, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, latest market prices, historical market prices, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
 
 ## Run Automated Tests
 
@@ -168,8 +169,9 @@ Covered behavior:
 - S&P 500/Nasdaq 100 historical market price storage and range reads.
 - portfolio history and benchmark normalization.
 - persisted DCA settings.
+- persisted per-portfolio Fortuneo security label mappings.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
-- FastAPI route contracts for previews, uploads, portfolio summaries, market history, DCA settings, and validation errors.
+- FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, market history, DCA settings, and validation errors.
 
 ## CSV Import Format
 
@@ -180,9 +182,9 @@ Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;
 15/01/2026;Achat;CW8.PA;3;470,50;1,95;EUR;PEA;Amundi MSCI World
 ```
 
-The parser also recognizes real Fortuneo bourse headers such as `Qté`, `Prix d'éxé`, `Courtage/Prélèvement`, `Montant brut`, and `Montant net`.
+The parser also recognizes real Fortuneo bourse headers such as `Qte`, `Prix d'exe`, `Courtage/Prelevement`, `Montant brut`, and `Montant net`, including their accented Fortuneo forms.
 
-Required fields are date, operation type, and security identifier. Quantity, price, fees, amount, currency, account, and description are optional or inferred when possible. Some Fortuneo bourse exports provide only a security label in `libellé`; preview returns a row-level mapping error until a `Code valeur`, `ISIN`, `ticker`, or `symbol` column is provided.
+Required fields are date, operation type, and security identifier. Quantity, price, fees, amount, currency, account, and description are optional or inferred when possible. Some Fortuneo bourse exports provide only a security label in `libelle`; preview marks those rows as `needs_mapping`, searches Yahoo Finance for ticker candidates, and requires the user to confirm a ticker before import. Confirmed mappings are saved per portfolio and reused on later imports.
 
 CSV uploads return an import summary:
 
@@ -217,11 +219,10 @@ If volatility is high and the recommendation is already increasing contributions
 
 ## Next Build Steps
 
-1. Add a security-label mapping flow for real Fortuneo bourse exports that do not include ticker-like identifiers.
-2. Add richer analytics for allocation drift, contributions, and benchmark comparison.
-3. Add authentication once local portfolio persistence is working.
-4. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.
-5. Move the frontend to a full React/Vite app once the standalone page becomes too large to maintain comfortably.
+1. Add richer analytics for allocation drift, contributions, and benchmark comparison.
+2. Add authentication once local portfolio persistence is working.
+3. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.
+4. Move the frontend to a full React/Vite app once the standalone page becomes too large to maintain comfortably.
 
 ## License
 

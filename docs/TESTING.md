@@ -58,8 +58,12 @@ test_invalid_csv_preview_returns_row_errors_without_bad_request ... ok
 test_invalid_csv_upload_returns_bad_request ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
 test_portfolio_summary_matches_golden_fixture ... ok
+test_preview_keeps_mapping_row_editable_when_search_fails ... ok
 test_preview_golden_csv_matches_fixture_without_persisting ... ok
 test_preview_marks_duplicate_rows_and_existing_transactions ... ok
+test_preview_returns_mapping_suggestions_for_unresolved_fortuneo_label ... ok
+test_security_search_route_uses_provider ... ok
+test_upload_persists_confirmed_mapping_and_reuses_it ... ok
 test_upload_transactions_skips_duplicates_and_lists_accounts ... ok
 test_duplicate_preview_fixture_marks_duplicate_rows ... ok
 test_golden_fixture_matches_expected_portfolio_history ... ok
@@ -70,6 +74,9 @@ test_import_skips_duplicate_transactions ... ok
 test_keeps_portfolios_isolated ... ok
 test_market_price_history_upserts_and_filters_ranges ... ok
 test_persists_transactions_and_prices ... ok
+test_security_mappings_are_persisted_per_portfolio ... ok
+test_existing_security_code_wins_over_mapping ... ok
+test_parse_fortuneo_bourse_with_security_mapping ... ok
 test_parse_fortuneo_bourse_zip_with_enriched_security_code ... ok
 test_parse_fortuneo_style_csv ... ok
 test_parse_zip_without_fortuneo_csv_fails_clearly ... ok
@@ -77,12 +84,13 @@ test_preview_fortuneo_bourse_without_security_code_reports_mapping_error ... ok
 test_enhanced_dca_applies_settings_multiplier_bounds ... ok
 test_enhanced_dca_increases_on_market_drawdown ... ok
 test_normalize_yfinance_history ... ok
+test_normalize_yfinance_search_quotes ... ok
 test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_build_portfolio_history_with_normalized_benchmarks ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 30 tests
+Ran 38 tests
 
 OK
 ```
@@ -192,6 +200,7 @@ import_sessions
 market_price_history
 market_prices
 portfolios
+security_mappings
 transaction_fingerprints
 transactions
 ```
@@ -387,7 +396,7 @@ Purpose:
 - verify the browser can load the standalone frontend;
 - verify CORS allows the frontend to talk to the backend;
 - verify the page can connect to `/api/health`, `/api/portfolios`, `/api/accounts`, and `/api/portfolio`;
-- verify CSV preview and confirmed upload use the backend when connected.
+- verify CSV/ZIP preview, security-label mapping, and confirmed upload use the backend when connected.
 
 Expected page behavior:
 
@@ -396,7 +405,7 @@ Expected page behavior:
 - choosing the sample CSV shows a preview status like:
 
 ```text
-Reviewed 4 row(s) from fortuneo_transactions_sample.csv: 4 new, 0 duplicate(s), 0 error(s).
+Reviewed 4 row(s) from fortuneo_transactions_sample.csv: 4 new, 0 mapping(s), 0 duplicate(s), 0 error(s).
 ```
 
 - clicking `Confirm import` then shows something like:
@@ -404,6 +413,8 @@ Reviewed 4 row(s) from fortuneo_transactions_sample.csv: 4 new, 0 duplicate(s), 
 ```text
 Imported 4 row(s), skipped 0 duplicate(s) from fortuneo_transactions_sample.csv.
 ```
+
+- for a Fortuneo bourse CSV or ZIP that has `libelle` but no `Code valeur`, preview shows `Map` rows; confirm each ticker suggestion before clicking `Confirm import`.
 
 If the page says:
 
@@ -466,7 +477,7 @@ tests/fixtures/
 Purpose:
 
 - provide stable Fortuneo-style CSV data without using private real transactions;
-- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, and unmapped security-label preview errors;
+- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, unmapped security-label preview errors, and mapping-assisted imports;
 - give API response schema, route, and import-preview tests exact expected outputs.
 
 Key files:
@@ -499,7 +510,7 @@ Purpose:
 - call FastAPI endpoints through `TestClient` instead of calling services directly;
 - use an isolated in-memory SQLite database by overriding the `get_db` dependency;
 - verify response-model serialization for `Decimal`, `date`, and `datetime` fields;
-- exercise the golden CSV preview/upload, duplicate-safe re-upload, account listing, price updates, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV error paths.
+- exercise the golden CSV preview/upload, mapping-assisted Fortuneo upload, duplicate-safe re-upload, account listing, price updates, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV error paths.
 
 Run these after changing:
 
@@ -513,7 +524,7 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 30 tests, OK
+Automated tests: 38 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works

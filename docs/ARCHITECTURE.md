@@ -78,6 +78,7 @@ GET    /api/transactions
 POST   /api/transactions
 POST   /api/transactions/preview
 POST   /api/transactions/upload
+GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
 PUT    /api/market/history
@@ -236,6 +237,7 @@ Alembic owns schema changes. The current migration chain creates:
 - transactions;
 - transaction fingerprints;
 - import sessions;
+- security label mappings;
 - latest market prices.
 - historical market prices.
 - DCA settings.
@@ -268,6 +270,7 @@ AccountRecord
 TransactionRecord
 TransactionFingerprintRecord
 ImportSessionRecord
+SecurityMappingRecord
 MarketPriceRecord
 MarketPriceHistoryRecord
 DcaSettingsRecord
@@ -326,6 +329,17 @@ Important fields:
 - `duplicate_count`
 - `created_at`
 
+`SecurityMappingRecord` stores confirmed label-to-ticker mappings for Fortuneo bourse rows that provide only a security label.
+
+Important fields:
+
+- `portfolio_record_id`
+- `normalized_label`
+- `display_label`
+- `ticker`
+- `provider`
+- provider metadata such as name, exchange, quote type, and currency
+
 `MarketPriceRecord` stores the latest known market price for each symbol.
 
 Important fields:
@@ -371,6 +385,7 @@ They know how to:
 - save a `Transaction` into a `TransactionRecord`;
 - create transaction fingerprints;
 - save import sessions;
+- save and load per-portfolio security label mappings;
 - skip duplicate transaction imports;
 - load database rows back into `Transaction` dataclasses;
 - save or update market prices;
@@ -398,6 +413,8 @@ upsert_market_price_history_many()
 list_market_price_history()
 get_dca_settings()
 upsert_dca_settings()
+get_security_mapping_symbols()
+upsert_security_mappings()
 ```
 
 This keeps SQLAlchemy code out of `main.py` and out of the business calculation services.
@@ -416,19 +433,20 @@ It handles:
 - semicolon and comma delimiters;
 - French number formats such as `470,50`;
 - French headers such as `Date operation`, `Quantite`, `Prix unitaire`, and `Frais`;
-- real Fortuneo bourse headers such as `Qté`, `Prix d'éxé`, `Courtage/Prélèvement`, `Montant brut`, and `Montant net`;
+- real Fortuneo bourse headers such as `Qte`, `Prix d'exe`, `Courtage/Prelevement`, `Montant brut`, and `Montant net`, including their accented Fortuneo forms;
 - operation types such as `Achat`, `Vente`, and longer labels such as `Achat comptant`;
 - text encodings such as UTF-8 and Windows `cp1252`.
 
-Security identifiers are still required for import. If a Fortuneo bourse row has only a `libellé` security label, preview returns a row-level error telling the user to provide a `Code valeur`, `ISIN`, ticker, or symbol. This keeps ambiguous real exports visible without silently inventing tickers.
+Security identifiers are still required for import. If a Fortuneo bourse row has only a `libelle` security label, preview returns `needs_mapping`, searches Yahoo Finance for suggestions, and waits for the user to confirm a ticker. Confirmed mappings are persisted per portfolio and reused on later imports.
 
 The main function is:
 
 ```python
-parse_transactions_csv(raw_csv)
+parse_transactions_csv(raw_csv, security_mappings=None)
+preview_transactions_csv(raw_csv, security_mappings=None)
 ```
 
-It returns a list of domain `Transaction` objects.
+`parse_transactions_csv()` returns domain `Transaction` objects. `preview_transactions_csv()` returns parsed rows, invalid rows, or unresolved security labels.
 
 ## Portfolio Service
 
@@ -514,15 +532,16 @@ YFinanceMarketDataProvider
 
 `StaticMarketDataProvider` is useful for tests or manual prices.
 
-`YFinanceMarketDataProvider` uses `yfinance` to fetch quotes.
+`YFinanceMarketDataProvider` uses `yfinance` to fetch quotes, historical prices, and ticker search candidates for unresolved Fortuneo labels.
 
 The API route:
 
 ```text
 GET /api/market/{ticker}
+GET /api/securities/search?query=AMUNDI%20MSCI%20WORLD
 ```
 
-uses this provider, saves the result into SQLite, then returns the quote.
+Quote routes save fetched prices into SQLite. Search routes return normalized Yahoo Finance candidates without writing to the database.
 
 ## Tests
 
@@ -555,7 +574,7 @@ Keeps the synthetic golden fixture dataset aligned with parser, portfolio summar
 tests/test_api_routes.py
 ```
 
-Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, upload, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
 
 ## Current Data Flows
 
@@ -564,6 +583,8 @@ CSV upload:
 ```text
 Frontend or API client
   -> POST /api/transactions/upload?portfolio_id=default
+    -> optional confirmed mappings JSON
+    -> upsert_security_mappings()
     -> parse_transactions_csv()
       -> list[Transaction]
         -> import_transactions()
@@ -595,11 +616,13 @@ CSV preview:
 ```text
 Frontend or API client
   -> POST /api/transactions/preview?portfolio_id=default
+    -> get_security_mapping_symbols()
     -> preview_transactions_csv()
-      -> row-level parsed transactions or errors
+      -> row-level parsed transactions, mapping needs, or errors
+        -> search unresolved labels with YFinanceMarketDataProvider
         -> transaction_fingerprint()
         -> existing_transaction_fingerprints()
-        -> statuses: new, duplicate_in_file, duplicate_existing, invalid
+        -> statuses: new, duplicate_in_file, duplicate_existing, needs_mapping, invalid
         -> no database writes
 ```
 
@@ -611,11 +634,18 @@ Preview responses include row-level statuses:
   "valid_count": 3,
   "duplicate_count": 1,
   "error_count": 0,
+  "mapping_count": 1,
   "rows": [
     {
       "row_number": 3,
       "status": "duplicate_in_file",
       "ticker": "CW8.PA"
+    },
+    {
+      "row_number": 4,
+      "status": "needs_mapping",
+      "security_label": "AMUNDI MSCI WORLD",
+      "suggestions": [{"symbol": "CW8.PA", "source": "yfinance"}]
     }
   ]
 }
@@ -722,9 +752,8 @@ The current architecture is a good foundation, but still early.
 
 Important next pieces:
 
-- security-label mapping for real Fortuneo bourse exports that do not include ticker-like identifiers;
 - richer allocation drift and contribution analytics;
 - broader route coverage as new API endpoints are added;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to add a user-facing mapping flow for unresolved Fortuneo security labels.
+The best next technical step is probably to add richer analytics once the local import workflow has been exercised with real exports.
