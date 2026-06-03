@@ -54,6 +54,7 @@ Expected output:
 test_dca_settings_and_recommendation_routes ... ok
 test_empty_portfolio_summary_returns_zeroes ... ok
 test_health_and_reference_routes ... ok
+test_fortuneo_account_export_preview_and_upload_report_wrong_export_type ... ok
 test_invalid_csv_preview_returns_row_errors_without_bad_request ... ok
 test_invalid_csv_upload_returns_bad_request ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
@@ -76,6 +77,7 @@ test_market_price_history_upserts_and_filters_ranges ... ok
 test_persists_transactions_and_prices ... ok
 test_security_mappings_are_persisted_per_portfolio ... ok
 test_existing_security_code_wins_over_mapping ... ok
+test_fortuneo_account_export_is_rejected_clearly ... ok
 test_parse_fortuneo_bourse_with_security_mapping ... ok
 test_parse_fortuneo_bourse_zip_with_enriched_security_code ... ok
 test_parse_fortuneo_style_csv ... ok
@@ -90,7 +92,7 @@ test_build_portfolio_history_with_normalized_benchmarks ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 38 tests
+Ran 40 tests
 
 OK
 ```
@@ -477,7 +479,7 @@ tests/fixtures/
 Purpose:
 
 - provide stable Fortuneo-style CSV data without using private real transactions;
-- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, unmapped security-label preview errors, and mapping-assisted imports;
+- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, unsupported bank-account exports, unmapped security-label preview errors, and mapping-assisted imports;
 - give API response schema, route, and import-preview tests exact expected outputs.
 
 Key files:

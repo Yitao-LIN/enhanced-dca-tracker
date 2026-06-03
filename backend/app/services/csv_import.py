@@ -89,6 +89,10 @@ HEADER_ALIASES = {
 
 FORTUNEO_ARCHIVE_CSV_RE = re.compile(r"(^|/)HistoriqueOperations.*\.csv$", re.IGNORECASE)
 
+
+class SemicolonDialect(csv.excel):
+    delimiter = ";"
+
 TYPE_ALIASES = {
     TransactionType.BUY: {"buy", "achat", "acheter", "subscription", "souscription"},
     TransactionType.SELL: {"sell", "vente", "vendre", "redemption", "rachat"},
@@ -200,6 +204,9 @@ def _decode_csv_bytes(raw_csv: bytes) -> str:
 
 
 def _sniff_dialect(text: str) -> csv.Dialect:
+    first_line = text.splitlines()[0] if text.splitlines() else ""
+    if first_line.count(";") > first_line.count(","):
+        return SemicolonDialect()
     sample = text[:2048]
     try:
         return csv.Sniffer().sniff(sample, delimiters=";,|\t,")
@@ -209,6 +216,12 @@ def _sniff_dialect(text: str) -> csv.Dialect:
 
 def _map_headers(fieldnames: Iterable[str]) -> dict[str, str]:
     normalized = {_normalize_header(name): name for name in fieldnames if name is not None}
+    if _is_fortuneo_account_export(normalized):
+        raise ValueError(
+            "This looks like a Fortuneo bank-account export with Debit/Credit columns, not a bourse investment "
+            "export. Export the Fortuneo bourse/investment history instead, with columns such as Operation, "
+            "Code valeur or ISIN, Qte, Prix, and Devise."
+        )
     mapped = {}
     for canonical, aliases in HEADER_ALIASES.items():
         for alias in aliases:
@@ -220,6 +233,14 @@ def _map_headers(fieldnames: Iterable[str]) -> dict[str, str]:
     if missing:
         raise ValueError(f"CSV is missing required columns: {', '.join(missing)}")
     return mapped
+
+
+def _is_fortuneo_account_export(normalized_headers: dict[str, str]) -> bool:
+    headers = set(normalized_headers)
+    has_account_flow_columns = {"debit", "credit"}.issubset(headers)
+    has_account_history_columns = {"date operation", "date valeur", "libelle"}.issubset(headers)
+    lacks_investment_columns = headers.isdisjoint({"operation", "code valeur", "code isin", "isin", "qte", "quantite"})
+    return has_account_flow_columns and has_account_history_columns and lacks_investment_columns
 
 
 def _parse_row(

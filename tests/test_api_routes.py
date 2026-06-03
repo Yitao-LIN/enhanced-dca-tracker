@@ -1,5 +1,7 @@
+import io
 import json
 import unittest
+import zipfile
 from decimal import Decimal
 from pathlib import Path
 
@@ -33,6 +35,21 @@ def fortuneo_bourse_without_code_bytes():
         "1411,50;1,95;-1413,45;EUR;\n"
     )
     return csv_text.encode("iso-8859-1")
+
+
+def fortuneo_account_export_bytes():
+    csv_text = (
+        "Date op\u00e9ration;Date valeur;libell\u00e9;D\u00e9bit;Cr\u00e9dit;\n"
+        "13/12/2019;13/12/2019;CARTE 12/12 EXAMPLE;-6,40;\n"
+    )
+    return csv_text.encode("iso-8859-1")
+
+
+def fortuneo_account_export_zip_bytes():
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, mode="w") as zip_file:
+        zip_file.writestr("HistoriqueOperationsBourse_2026.csv", fortuneo_account_export_bytes())
+    return archive.getvalue()
 
 
 class StubSearchProvider:
@@ -257,6 +274,26 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(response.json()["error_count"], 1)
         self.assertEqual(response.json()["rows"][0]["status"], "invalid")
         self.assertIn("CSV is missing required columns", response.json()["rows"][0]["error"])
+
+    def test_fortuneo_account_export_preview_and_upload_report_wrong_export_type(self):
+        preview = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("HistoriqueOperationsBourse.zip", fortuneo_account_export_zip_bytes(), "application/zip")},
+        )
+
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(preview.json()["row_count"], 1)
+        self.assertEqual(preview.json()["error_count"], 1)
+        self.assertEqual(preview.json()["rows"][0]["status"], "invalid")
+        self.assertIn("Fortuneo bank-account export", preview.json()["rows"][0]["error"])
+
+        upload = self.client.post(
+            "/api/transactions/upload?portfolio_id=default",
+            files={"file": ("HistoriqueOperationsBourse.zip", fortuneo_account_export_zip_bytes(), "application/zip")},
+        )
+
+        self.assertEqual(upload.status_code, 400)
+        self.assertIn("Fortuneo bank-account export", upload.json()["detail"])
 
     def test_preview_returns_mapping_suggestions_for_unresolved_fortuneo_label(self):
         provider = StubSearchProvider(

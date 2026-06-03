@@ -88,6 +88,23 @@ class CsvImportTests(unittest.TestCase):
 
         self.assertEqual(transactions[0].ticker, "EWLD.PA")
 
+    def test_fortuneo_account_export_is_rejected_clearly(self):
+        csv_text = (
+            "Date op\u00e9ration;Date valeur;libell\u00e9;D\u00e9bit;Cr\u00e9dit;\n"
+            "13/12/2019;13/12/2019;CARTE 12/12 EXAMPLE;-6,40;\n"
+        )
+
+        rows = preview_transactions_csv(csv_text.encode("iso-8859-1"))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].row_number, 1)
+        self.assertIsNone(rows[0].transaction)
+        self.assertIn("Fortuneo bank-account export", rows[0].error)
+        self.assertIn("bourse investment export", rows[0].error)
+
+        with self.assertRaisesRegex(ValueError, "Fortuneo bank-account export"):
+            parse_transactions_csv(csv_text.encode("iso-8859-1"))
+
     def test_parse_zip_without_fortuneo_csv_fails_clearly(self):
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, mode="w") as zip_file:
