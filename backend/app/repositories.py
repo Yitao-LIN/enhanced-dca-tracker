@@ -190,6 +190,30 @@ def list_security_mappings(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID
     return list(db.scalars(statement))
 
 
+def delete_security_mapping(db: Session, security_label: str, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> bool:
+    slug = _normalize_slug(portfolio_id)
+    portfolio = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
+    if portfolio is None:
+        return False
+
+    normalized_label = normalize_security_label(security_label)
+    if not normalized_label:
+        return False
+
+    record = db.scalar(
+        select(SecurityMappingRecord).where(
+            SecurityMappingRecord.portfolio_record_id == portfolio.id,
+            SecurityMappingRecord.normalized_label == normalized_label,
+        )
+    )
+    if record is None:
+        return False
+
+    db.delete(record)
+    db.commit()
+    return True
+
+
 def upsert_security_mapping(
     db: Session,
     mapping: SecurityMapping,
@@ -240,9 +264,15 @@ def upsert_security_mappings(
     mappings: list[SecurityMapping],
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
 ) -> list[SecurityMappingRecord]:
+    unique_mappings: dict[str, SecurityMapping] = {}
+    for mapping in mappings:
+        normalized_label = normalize_security_label(mapping.security_label)
+        if normalized_label:
+            unique_mappings[normalized_label] = mapping
+
     records = [
         upsert_security_mapping(db, mapping, portfolio_id=portfolio_id, commit=False)
-        for mapping in mappings
+        for mapping in unique_mappings.values()
     ]
     db.commit()
     for record in records:

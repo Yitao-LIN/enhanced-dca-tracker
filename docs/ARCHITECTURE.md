@@ -78,6 +78,9 @@ GET    /api/transactions
 POST   /api/transactions
 POST   /api/transactions/preview
 POST   /api/transactions/upload
+GET    /api/security-mappings
+PUT    /api/security-mappings
+DELETE /api/security-mappings
 GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
@@ -574,7 +577,7 @@ Keeps the synthetic golden fixture dataset aligned with parser, portfolio summar
 tests/test_api_routes.py
 ```
 
-Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
 
 ## Current Data Flows
 
@@ -619,7 +622,7 @@ Frontend or API client
     -> get_security_mapping_symbols()
     -> preview_transactions_csv()
       -> row-level parsed transactions, mapping needs, or errors
-        -> search unresolved labels with YFinanceMarketDataProvider
+        -> search unresolved labels with YFinanceMarketDataProvider using raw and cleaned label queries
         -> transaction_fingerprint()
         -> existing_transaction_fingerprints()
         -> statuses: new, duplicate_in_file, duplicate_existing, needs_mapping, invalid
@@ -645,10 +648,19 @@ Preview responses include row-level statuses:
       "row_number": 4,
       "status": "needs_mapping",
       "security_label": "AMUNDI MSCI WORLD",
-      "suggestions": [{"symbol": "CW8.PA", "source": "yfinance"}]
+      "suggestions": [{"symbol": "CW8.PA", "source": "yfinance", "query": "AMUNDI MSCI WORLD"}]
     }
   ]
 }
+```
+
+Saved security mapping management:
+
+```text
+GET /api/security-mappings?portfolio_id=default
+PUT /api/security-mappings?portfolio_id=default
+DELETE /api/security-mappings?portfolio_id=default&security_label=AMUNDI%20MSCI%20WORLD
+  -> list/upsert/delete SecurityMappingRecord rows scoped to one portfolio
 ```
 
 Portfolio summary:

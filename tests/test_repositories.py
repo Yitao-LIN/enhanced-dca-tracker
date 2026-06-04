@@ -94,6 +94,7 @@ class RepositoryTests(unittest.TestCase):
         from app.repositories import (
             SecurityMapping,
             create_portfolio,
+            delete_security_mapping,
             get_security_mapping_symbols,
             list_security_mappings,
             upsert_security_mapping,
@@ -121,6 +122,9 @@ class RepositoryTests(unittest.TestCase):
             default_mappings = get_security_mapping_symbols(db)
             long_term_mappings = get_security_mapping_symbols(db, portfolio_id="long-term")
             listed = list_security_mappings(db)
+            deleted = delete_security_mapping(db, "AMUNDI MSCI WORLD")
+            default_after_delete = get_security_mapping_symbols(db)
+            long_term_after_delete = get_security_mapping_symbols(db, portfolio_id="long-term")
 
         self.assertEqual(default_record.ticker, "CW8.PA")
         self.assertEqual(default_record.provider, "yfinance")
@@ -129,6 +133,9 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(default_mappings, {"amundi msci world": "CW8.PA"})
         self.assertEqual(long_term_mappings, {"amundi msci world": "WRD.PA"})
         self.assertEqual([record.display_label for record in listed], ["AMUNDI MSCI WORLD"])
+        self.assertTrue(deleted)
+        self.assertEqual(default_after_delete, {})
+        self.assertEqual(long_term_after_delete, {"amundi msci world": "WRD.PA"})
 
     def test_import_skips_duplicate_transactions(self):
         from app.domain import Transaction, TransactionType

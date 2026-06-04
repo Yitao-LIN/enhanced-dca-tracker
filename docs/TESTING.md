@@ -59,11 +59,14 @@ test_invalid_csv_preview_returns_row_errors_without_bad_request ... ok
 test_invalid_csv_upload_returns_bad_request ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
 test_portfolio_summary_matches_golden_fixture ... ok
-test_preview_keeps_mapping_row_editable_when_search_fails ... ok
 test_preview_golden_csv_matches_fixture_without_persisting ... ok
+test_preview_keeps_mapping_row_editable_when_search_fails ... ok
 test_preview_marks_duplicate_rows_and_existing_transactions ... ok
+test_preview_retries_cleaned_query_when_raw_search_has_no_results ... ok
 test_preview_returns_mapping_suggestions_for_unresolved_fortuneo_label ... ok
+test_security_mapping_management_routes_are_portfolio_scoped ... ok
 test_security_search_route_uses_provider ... ok
+test_upload_deduplicates_repeated_confirmed_mapping_labels ... ok
 test_upload_persists_confirmed_mapping_and_reuses_it ... ok
 test_upload_transactions_skips_duplicates_and_lists_accounts ... ok
 test_duplicate_preview_fixture_marks_duplicate_rows ... ok
@@ -83,6 +86,7 @@ test_parse_fortuneo_bourse_zip_with_enriched_security_code ... ok
 test_parse_fortuneo_style_csv ... ok
 test_parse_zip_without_fortuneo_csv_fails_clearly ... ok
 test_preview_fortuneo_bourse_without_security_code_reports_mapping_error ... ok
+test_preview_multi_row_fortuneo_bourse_zip_reports_mapping_rows ... ok
 test_enhanced_dca_applies_settings_multiplier_bounds ... ok
 test_enhanced_dca_increases_on_market_drawdown ... ok
 test_normalize_yfinance_history ... ok
@@ -92,7 +96,7 @@ test_build_portfolio_history_with_normalized_benchmarks ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 40 tests
+Ran 44 tests
 
 OK
 ```
@@ -479,13 +483,15 @@ tests/fixtures/
 Purpose:
 
 - provide stable Fortuneo-style CSV data without using private real transactions;
-- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, unsupported bank-account exports, unmapped security-label preview errors, and mapping-assisted imports;
+- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, unsupported bank-account exports, unmapped security-label preview errors, cleaned-query search retries, saved mapping management, and mapping-assisted imports;
 - give API response schema, route, and import-preview tests exact expected outputs.
 
 Key files:
 
 - `fortuneo_golden.csv`
 - `fortuneo_duplicate_rows.csv`
+- `fortuneo_bourse_mapping.zip`
+- `HistoriqueOperationsBourse_mapping.csv`
 - `market_history_basic.json`
 - `expected_portfolio_summary.json`
 - `expected_import_preview.json`

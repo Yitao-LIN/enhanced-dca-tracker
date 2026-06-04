@@ -53,15 +53,18 @@ def fortuneo_account_export_zip_bytes():
 
 
 class StubSearchProvider:
-    def __init__(self, results=None, error: Exception | None = None):
+    def __init__(self, results=None, error: Exception | None = None, results_by_query=None):
         self.results = results or []
         self.error = error
+        self.results_by_query = results_by_query or {}
         self.queries = []
 
     def search_symbols(self, query: str, limit: int = 5):
         self.queries.append((query, limit))
         if self.error is not None:
             raise self.error
+        if query in self.results_by_query:
+            return self.results_by_query[query][:limit]
         return self.results[:limit]
 
 
@@ -325,7 +328,38 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["status"], "needs_mapping")
         self.assertEqual(payload["rows"][0]["security_label"], "AMUNDI MSCI WORLD")
         self.assertEqual(payload["rows"][0]["suggestions"][0]["symbol"], "CW8.PA")
+        self.assertEqual(payload["rows"][0]["suggestions"][0]["query"], "AMUNDI MSCI WORLD")
         self.assertEqual(provider.queries, [("AMUNDI MSCI WORLD", 5)])
+
+    def test_preview_retries_cleaned_query_when_raw_search_has_no_results(self):
+        provider = StubSearchProvider(
+            results_by_query={
+                "AMUNDI MSCI WORLD": [
+                    SymbolSearchResult(
+                        symbol="CW8.PA",
+                        name="Amundi MSCI World UCITS ETF",
+                        exchange="PAR",
+                        quote_type="ETF",
+                        currency="EUR",
+                        source="yfinance",
+                    )
+                ]
+            }
+        )
+        app.dependency_overrides[get_symbol_search_provider] = lambda: provider
+
+        response = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("fortuneo_bourse_mapping.zip", load_fixture_bytes("fortuneo_bourse_mapping.zip"), "application/zip")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["rows"][0]
+        self.assertEqual(row["status"], "needs_mapping")
+        self.assertEqual(row["suggestions"][0]["symbol"], "CW8.PA")
+        self.assertEqual(row["suggestions"][0]["query"], "AMUNDI MSCI WORLD")
+        self.assertIn(("AMUNDI MSCI WORLD UCITS ETF EUR", 5), provider.queries)
+        self.assertIn(("AMUNDI MSCI WORLD", 5), provider.queries)
 
     def test_upload_persists_confirmed_mapping_and_reuses_it(self):
         mapping_payload = [
@@ -362,6 +396,32 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(preview.json()["rows"][0]["status"], "duplicate_existing")
         self.assertNotIn("mapping_count", preview.json())
 
+    def test_upload_deduplicates_repeated_confirmed_mapping_labels(self):
+        mapping_payload = [
+            {"security_label": "AMUNDI MSCI WORLD UCITS ETF EUR", "ticker": "CW8.PA", "provider": "manual"},
+            {"security_label": "LYXOR PEA NASDAQ 100 UCITS ETF", "ticker": "PANX.PA", "provider": "manual"},
+            {"security_label": "AMUNDI MSCI WORLD UCITS ETF EUR", "ticker": "CW8.PA", "provider": "manual"},
+        ]
+
+        upload = self.client.post(
+            "/api/transactions/upload?portfolio_id=default",
+            files={"file": ("fortuneo_bourse_mapping.zip", load_fixture_bytes("fortuneo_bourse_mapping.zip"), "application/zip")},
+            data={"mappings": json.dumps(mapping_payload)},
+        )
+
+        self.assertEqual(upload.status_code, 200)
+        self.assertEqual(upload.json()["imported"], 3)
+
+        mappings = self.client.get("/api/security-mappings?portfolio_id=default")
+        self.assertEqual(mappings.status_code, 200)
+        self.assertEqual(
+            {mapping["security_label"]: mapping["ticker"] for mapping in mappings.json()},
+            {
+                "AMUNDI MSCI WORLD UCITS ETF EUR": "CW8.PA",
+                "LYXOR PEA NASDAQ 100 UCITS ETF": "PANX.PA",
+            },
+        )
+
     def test_preview_keeps_mapping_row_editable_when_search_fails(self):
         app.dependency_overrides[get_symbol_search_provider] = lambda: StubSearchProvider(error=RuntimeError("search offline"))
 
@@ -385,6 +445,46 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()[0]["symbol"], "CW8.PA")
+        self.assertEqual(response.json()[0]["query"], "AMUNDI MSCI WORLD")
+
+    def test_security_mapping_management_routes_are_portfolio_scoped(self):
+        default_create = self.client.put(
+            "/api/security-mappings?portfolio_id=default",
+            json={"security_label": "AMUNDI MSCI WORLD", "ticker": "cw8.pa"},
+        )
+        self.assertEqual(default_create.status_code, 200)
+        self.assertEqual(default_create.json()["ticker"], "CW8.PA")
+        self.assertEqual(default_create.json()["security_label"], "AMUNDI MSCI WORLD")
+
+        long_term_create = self.client.put(
+            "/api/security-mappings?portfolio_id=long-term",
+            json={"security_label": "AMUNDI MSCI WORLD", "ticker": "wrd.pa"},
+        )
+        self.assertEqual(long_term_create.status_code, 200)
+        self.assertEqual(long_term_create.json()["ticker"], "WRD.PA")
+
+        default_update = self.client.put(
+            "/api/security-mappings?portfolio_id=default",
+            json={"security_label": "AMUNDI MSCI WORLD", "ticker": "EWLD.PA"},
+        )
+        self.assertEqual(default_update.status_code, 200)
+        self.assertEqual(default_update.json()["ticker"], "EWLD.PA")
+
+        default_list = self.client.get("/api/security-mappings?portfolio_id=default")
+        long_term_list = self.client.get("/api/security-mappings?portfolio_id=long-term")
+
+        self.assertEqual([mapping["ticker"] for mapping in default_list.json()], ["EWLD.PA"])
+        self.assertEqual([mapping["ticker"] for mapping in long_term_list.json()], ["WRD.PA"])
+
+        deleted = self.client.delete("/api/security-mappings?portfolio_id=default&security_label=AMUNDI%20MSCI%20WORLD")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["deleted"], 1)
+
+        self.assertEqual(self.client.get("/api/security-mappings?portfolio_id=default").json(), [])
+        self.assertEqual(
+            [mapping["ticker"] for mapping in self.client.get("/api/security-mappings?portfolio_id=long-term").json()],
+            ["WRD.PA"],
+        )
 
     def _upload_golden_csv(self):
         return self.client.post(

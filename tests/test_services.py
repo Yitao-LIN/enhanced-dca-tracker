@@ -3,6 +3,7 @@ import unittest
 import zipfile
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pandas as pd
 
@@ -12,6 +13,9 @@ from app.services.dca import calculate_enhanced_dca
 from app.services.market_data import normalize_yfinance_history, normalize_yfinance_search_quotes
 from app.services.portfolio import build_holdings, summarize_portfolio
 from app.services.portfolio_history import build_portfolio_history
+
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 class CsvImportTests(unittest.TestCase):
@@ -64,6 +68,31 @@ class CsvImportTests(unittest.TestCase):
         self.assertEqual(rows[0].security_label, "AMUNDI MSCI WORLD")
         self.assertIn("AMUNDI MSCI WORLD", rows[0].error)
         self.assertIn("needs a ticker mapping", rows[0].error)
+
+    def test_preview_multi_row_fortuneo_bourse_zip_reports_mapping_rows(self):
+        rows = preview_transactions_csv((FIXTURES_DIR / "fortuneo_bourse_mapping.zip").read_bytes())
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(sum(1 for row in rows if row.security_label), 3)
+        self.assertEqual(
+            {row.security_label for row in rows},
+            {"AMUNDI MSCI WORLD UCITS ETF EUR", "LYXOR PEA NASDAQ 100 UCITS ETF"},
+        )
+        self.assertTrue(all(row.transaction is None for row in rows))
+
+        transactions = parse_transactions_csv(
+            (FIXTURES_DIR / "fortuneo_bourse_mapping.zip").read_bytes(),
+            security_mappings={
+                "amundi msci world ucits etf eur": "CW8.PA",
+                "lyxor pea nasdaq 100 ucits etf": "PANX.PA",
+            },
+        )
+
+        self.assertEqual([transaction.ticker for transaction in transactions], ["CW8.PA", "PANX.PA", "CW8.PA"])
+        self.assertEqual(
+            [transaction.transaction_type for transaction in transactions],
+            [TransactionType.BUY, TransactionType.BUY, TransactionType.SELL],
+        )
 
     def test_parse_fortuneo_bourse_with_security_mapping(self):
         csv_text = (

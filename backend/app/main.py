@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from datetime import date
 from decimal import Decimal
 
@@ -18,6 +20,7 @@ from app.repositories import (
     bootstrap_reference_data,
     count_transactions,
     create_portfolio,
+    delete_security_mapping,
     ensure_account,
     existing_transaction_fingerprints,
     get_dca_settings as load_dca_settings,
@@ -27,6 +30,7 @@ from app.repositories import (
     list_market_price_history,
     list_accounts as load_accounts,
     list_portfolios as load_portfolios,
+    list_security_mappings as load_security_mappings,
     list_transactions as load_transactions,
     MarketPriceHistoryPoint,
     SecurityMapping,
@@ -39,6 +43,7 @@ from app.repositories import (
 from app.schemas import (
     AccountIn,
     AccountOut,
+    DeletedCountOut,
     DcaRequest,
     DcaRecommendationOut,
     DcaSettingsIn,
@@ -57,6 +62,7 @@ from app.schemas import (
     PortfolioSummaryOut,
     PriceMap,
     SecurityMappingIn,
+    SecurityMappingOut,
     SymbolSearchCandidateOut,
     TransactionCreateOut,
     TransactionIn,
@@ -272,6 +278,50 @@ def list_transactions(
     return load_transactions(db, portfolio_id=portfolio_id)
 
 
+@app.get("/api/security-mappings", response_model=list[SecurityMappingOut])
+def list_security_mappings(
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    return [_security_mapping_payload(record, portfolio_id) for record in load_security_mappings(db, portfolio_id=portfolio_id)]
+
+
+@app.put("/api/security-mappings", response_model=SecurityMappingOut)
+def set_security_mapping(
+    payload: SecurityMappingIn,
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    try:
+        record = upsert_security_mappings(
+            db,
+            [
+                SecurityMapping(
+                    security_label=payload.security_label,
+                    ticker=payload.ticker,
+                    provider=payload.provider,
+                    provider_name=payload.provider_name,
+                    provider_exchange=payload.provider_exchange,
+                    provider_quote_type=payload.provider_quote_type,
+                    provider_currency=payload.provider_currency,
+                )
+            ],
+            portfolio_id=portfolio_id,
+        )[0]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _security_mapping_payload(record, portfolio_id)
+
+
+@app.delete("/api/security-mappings", response_model=DeletedCountOut)
+def remove_security_mapping(
+    security_label: str,
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    return {"deleted": int(delete_security_mapping(db, security_label=security_label, portfolio_id=portfolio_id))}
+
+
 @app.get("/api/securities/search", response_model=list[SymbolSearchCandidateOut])
 def search_securities(
     query: str,
@@ -279,7 +329,7 @@ def search_securities(
     search_provider: YFinanceMarketDataProvider = Depends(get_symbol_search_provider),
 ) -> list[dict[str, object]]:
     try:
-        return [_symbol_search_payload(result) for result in search_provider.search_symbols(query, limit=limit)]
+        return [_symbol_search_payload(result, query=query) for result in search_provider.search_symbols(query, limit=limit)]
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -519,17 +569,54 @@ def _search_suggestions(
 ) -> tuple[list[dict[str, object]], str | None]:
     if security_label in suggestion_cache:
         return suggestion_cache[security_label]
-    try:
-        suggestions = [_symbol_search_payload(result) for result in search_provider.search_symbols(security_label, limit=5)]
-        search_error = None
-    except Exception as exc:
-        suggestions = []
-        search_error = str(exc)
+
+    search_error = None
+    suggestions: list[dict[str, object]] = []
+    for query in _security_label_search_queries(security_label):
+        try:
+            suggestions = [_symbol_search_payload(result, query=query) for result in search_provider.search_symbols(query, limit=5)]
+        except Exception as exc:
+            search_error = str(exc)
+            suggestions = []
+            break
+        if suggestions:
+            break
+
     suggestion_cache[security_label] = (suggestions, search_error)
     return suggestions, search_error
 
 
-def _symbol_search_payload(result: object) -> dict[str, object]:
+def _security_label_search_queries(security_label: str) -> list[str]:
+    raw_query = re.sub(r"\s+", " ", security_label).strip()
+    ascii_query = unicodedata.normalize("NFKD", raw_query).encode("ascii", "ignore").decode("ascii")
+    ascii_query = re.sub(r"[^a-zA-Z0-9.&+ -]+", " ", ascii_query)
+    ascii_query = re.sub(r"\s+", " ", ascii_query).strip()
+    noise_words = {
+        "ACC",
+        "CAP",
+        "CAPITALISATION",
+        "DIST",
+        "DISTRIBUTION",
+        "ETF",
+        "EUR",
+        "EURO",
+        "FR",
+        "IE",
+        "LU",
+        "UCITS",
+        "USD",
+    }
+    compact_query = " ".join(token for token in ascii_query.split() if token.upper() not in noise_words)
+    compact_query = re.sub(r"\s+", " ", compact_query).strip()
+
+    queries = []
+    for query in (raw_query, ascii_query, compact_query):
+        if query and query not in queries:
+            queries.append(query)
+    return queries
+
+
+def _symbol_search_payload(result: object, query: str | None = None) -> dict[str, object]:
     return {
         "symbol": result.symbol,
         "name": result.name,
@@ -538,6 +625,7 @@ def _symbol_search_payload(result: object) -> dict[str, object]:
         "currency": result.currency,
         "score": result.score,
         "source": result.source,
+        "query": query,
     }
 
 
@@ -587,6 +675,23 @@ def _account_payload(record: object | None) -> dict[str, object]:
         "account_type": record.account_type,
         "currency": record.currency,
         "created_at": record.created_at,
+    }
+
+
+def _security_mapping_payload(record: object, portfolio_id: str) -> dict[str, object]:
+    return {
+        "id": record.id,
+        "portfolio_id": portfolio_id,
+        "security_label": record.display_label,
+        "normalized_label": record.normalized_label,
+        "ticker": record.ticker,
+        "provider": record.provider,
+        "provider_name": record.provider_name,
+        "provider_exchange": record.provider_exchange,
+        "provider_quote_type": record.provider_quote_type,
+        "provider_currency": record.provider_currency,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
     }
 
 

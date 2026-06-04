@@ -134,6 +134,9 @@ GET    /api/transactions
 POST   /api/transactions
 POST   /api/transactions/preview
 POST   /api/transactions/upload
+GET    /api/security-mappings
+PUT    /api/security-mappings
+DELETE /api/security-mappings
 GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
@@ -169,7 +172,7 @@ Covered behavior:
 - S&P 500/Nasdaq 100 historical market price storage and range reads.
 - portfolio history and benchmark normalization.
 - persisted DCA settings.
-- persisted per-portfolio Fortuneo security label mappings.
+- persisted and editable per-portfolio Fortuneo security label mappings.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
 - FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, market history, DCA settings, and validation errors.
 
@@ -184,7 +187,7 @@ Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;
 
 The parser also recognizes real Fortuneo bourse headers such as `Qte`, `Prix d'exe`, `Courtage/Prelevement`, `Montant brut`, and `Montant net`, including their accented Fortuneo forms.
 
-Required fields are date, operation type, and security identifier. Quantity, price, fees, amount, currency, account, and description are optional or inferred when possible. Some Fortuneo bourse exports provide only a security label in `libelle`; preview marks those rows as `needs_mapping`, searches Yahoo Finance for ticker candidates, and requires the user to confirm a ticker before import. Confirmed mappings are saved per portfolio and reused on later imports.
+Required fields are date, operation type, and security identifier. Quantity, price, fees, amount, currency, account, and description are optional or inferred when possible. Some Fortuneo bourse exports provide only a security label in `libelle`; preview marks those rows as `needs_mapping`, searches Yahoo Finance with raw and cleaned label queries, and requires the user to confirm a ticker before import. Confirmed mappings are saved per portfolio, reused on later imports, and editable from the frontend holdings area.
 
 CSV uploads return an import summary:
 

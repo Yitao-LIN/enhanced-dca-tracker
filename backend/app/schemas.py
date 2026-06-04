@@ -78,6 +78,21 @@ class SecurityMappingIn(BaseModel):
     provider_currency: str | None = None
 
 
+class SecurityMappingOut(ApiModel):
+    id: int
+    portfolio_id: str
+    security_label: str
+    normalized_label: str
+    ticker: str
+    provider: str
+    provider_name: str | None = None
+    provider_exchange: str | None = None
+    provider_quote_type: str | None = None
+    provider_currency: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class PortfolioHistoryRequest(BaseModel):
     portfolio_id: str = "default"
     start_date: date | None = None
@@ -159,6 +174,7 @@ class SymbolSearchCandidateOut(ApiModel):
     currency: str | None = None
     score: float | None = None
     source: str
+    query: str | None = None
 
 
 class ImportPreviewRowOut(ApiModel):
@@ -190,6 +206,10 @@ class ImportPreviewOut(ApiModel):
 
 class UpdatedCountOut(ApiModel):
     updated: int
+
+
+class DeletedCountOut(ApiModel):
+    deleted: int
 
 
 class MarketQuoteOut(ApiModel):
