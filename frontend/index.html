@@ -105,6 +105,11 @@
         font-weight: 650;
       }
 
+      h3 {
+        font-size: 14px;
+        font-weight: 650;
+      }
+
       .subtitle {
         color: var(--muted);
         margin-top: 4px;
@@ -284,6 +289,49 @@
         margin-top: 6px;
       }
 
+      .suggestion-list {
+        display: grid;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .suggestion-row {
+        display: grid;
+        grid-template-columns: minmax(70px, auto) minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px;
+        background: var(--surface-soft);
+        font-size: 12px;
+      }
+
+      .suggestion-row span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .mapping-editor {
+        border-top: 1px solid var(--line);
+        margin-top: 14px;
+        padding-top: 14px;
+      }
+
+      .mapping-editor table {
+        min-width: 760px;
+      }
+
+      .mapping-editor input {
+        min-width: 130px;
+      }
+
+      .mapping-editor .actions {
+        flex-wrap: nowrap;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -460,7 +508,15 @@
       }
 
       async function apiRequest(path, options = {}) {
-        const response = await fetch(`${API_BASE_URL}${path}`, options);
+        let response;
+        try {
+          response = await fetch(`${API_BASE_URL}${path}`, options);
+        } catch (error) {
+          throw new Error(
+            `Backend request failed before a response from ${API_BASE_URL}${path}. ` +
+            `Check that FastAPI is running, then click Sync API. Browser error: ${error.message}`
+          );
+        }
         if (!response.ok) {
           const message = await response.text();
           throw new Error(message || `API request failed with ${response.status}`);
@@ -724,6 +780,10 @@
         const [importPreview, setImportPreview] = useState(null);
         const [pendingImportFile, setPendingImportFile] = useState(null);
         const [mappingSelections, setMappingSelections] = useState({});
+        const [securityMappings, setSecurityMappings] = useState([]);
+        const [mappingEditorOpen, setMappingEditorOpen] = useState(false);
+        const [mappingDrafts, setMappingDrafts] = useState({});
+        const [newMapping, setNewMapping] = useState({ security_label: "", ticker: "" });
         const [status, setStatus] = useState("Demo mode loaded. Start FastAPI on port 8000 to sync with the backend.");
 
         const demoHoldings = useMemo(() => buildHoldings(transactions, prices), [transactions, prices]);
@@ -772,6 +832,13 @@
             refreshBackendData(selectedPortfolioId);
           }
         }, [selectedPortfolioId]);
+
+        function mappingDraftsFromRows(rows) {
+          return (rows || []).reduce((drafts, mapping) => {
+            drafts[mapping.normalized_label] = mapping.ticker || "";
+            return drafts;
+          }, {});
+        }
 
         function mappingKey(row) {
           return row.security_label || `row-${row.row_number}`;
@@ -822,13 +889,14 @@
         }
 
         function confirmedMappingsPayload() {
-          return previewMappingRows
+          const mappingsByLabel = {};
+          previewMappingRows
             .filter((row) => isMappingConfirmed(row))
-            .map((row) => {
+            .forEach((row) => {
               const selection = mappingSelection(row);
               const ticker = String(selection.ticker || "").trim().toUpperCase();
               const suggestion = (row.suggestions || []).find((item) => item.symbol === ticker);
-              return {
+              mappingsByLabel[row.security_label] = {
                 security_label: row.security_label,
                 ticker,
                 provider: suggestion?.source || "manual",
@@ -838,6 +906,18 @@
                 provider_currency: suggestion?.currency || null,
               };
             });
+          return Object.values(mappingsByLabel);
+        }
+
+        function renderSuggestionRow(row, suggestion) {
+          const details = [suggestion.name, suggestion.exchange, suggestion.currency, suggestion.query ? `query: ${suggestion.query}` : ""].filter(Boolean).join(" - ");
+          return (
+            <div className="suggestion-row" key={`${row.row_number}-${suggestion.symbol}`}>
+              <strong>{suggestion.symbol}</strong>
+              <span title={details}>{details || suggestion.source}</span>
+              <button onClick={() => updateMappingTicker(row, suggestion.symbol)}>Use</button>
+            </div>
+          );
         }
 
         function renderMappingCell(row) {
@@ -847,6 +927,7 @@
           return (
             <div className="mapping-cell">
               <strong>{row.security_label || "-"}</strong>
+              <div className="mapping-note">Confirming saves this ticker mapping for the selected portfolio.</div>
               <div className="mapping-controls">
                 <input
                   type="text"
@@ -864,8 +945,90 @@
                   {selection.confirmed ? "Confirmed" : "Confirm"}
                 </button>
               </div>
-              {row.search_error && <div className="mapping-note negative">{row.search_error}</div>}
+              {suggestions.length > 0 && (
+                <div className="suggestion-list">
+                  {suggestions.map((suggestion) => renderSuggestionRow(row, suggestion))}
+                </div>
+              )}
+              {!row.search_error && suggestions.length === 0 && (
+                <div className="mapping-note warning">No Yahoo suggestions found. Type the ticker manually, then confirm.</div>
+              )}
+              {row.search_error && <div className="mapping-note negative">Search failed: {row.search_error}. Type the ticker manually, then confirm.</div>}
               {selection.confirmed && <div className="mapping-note positive">Mapped to {String(ticker).toUpperCase()}</div>}
+            </div>
+          );
+        }
+
+        function renderMappingEditor() {
+          return (
+            <div className="mapping-editor">
+              <div className="toolbar">
+                <h3>Security mappings</h3>
+                <span className="subtitle">{securityMappings.length} saved</span>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Fortuneo label</th>
+                      <th>Ticker</th>
+                      <th>Source</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {securityMappings.map((mapping) => (
+                      <tr key={mapping.normalized_label}>
+                        <td><strong>{mapping.security_label}</strong></td>
+                        <td>
+                          <input
+                            type="text"
+                            value={mappingDrafts[mapping.normalized_label] ?? mapping.ticker}
+                            aria-label={`Saved ticker for ${mapping.security_label}`}
+                            onChange={(event) => updateSavedMappingDraft(mapping, event.target.value)}
+                          />
+                        </td>
+                        <td>{[mapping.provider, mapping.provider_exchange, mapping.provider_currency].filter(Boolean).join(" / ") || "-"}</td>
+                        <td>
+                          <div className="actions">
+                            <button disabled={!String(mappingDrafts[mapping.normalized_label] ?? mapping.ticker ?? "").trim()} onClick={() => saveSecurityMapping(mapping)}>Save</button>
+                            <button onClick={() => deleteSavedMapping(mapping)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {!securityMappings.length && (
+                      <tr>
+                        <td colSpan={4} className="mapping-note">No saved mappings yet. Confirm a mapping during import or add one manually.</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td>
+                        <input
+                          type="text"
+                          placeholder="Fortuneo label"
+                          value={newMapping.security_label}
+                          aria-label="New Fortuneo security label"
+                          onChange={(event) => setNewMapping((current) => ({ ...current, security_label: event.target.value }))}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          placeholder="Ticker"
+                          value={newMapping.ticker}
+                          aria-label="New ticker mapping"
+                          onChange={(event) => setNewMapping((current) => ({ ...current, ticker: event.target.value.toUpperCase() }))}
+                        />
+                      </td>
+                      <td>manual</td>
+                      <td>
+                        <button disabled={!newMapping.security_label.trim() || !newMapping.ticker.trim()} onClick={saveNewSecurityMapping}>Add mapping</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           );
         }
@@ -888,17 +1051,20 @@
         async function refreshBackendData(portfolioId = selectedPortfolioId) {
           setApiLoading(true);
           try {
-            const [portfolioRows, accountRows, summary, historyRows, dcaSettings] = await Promise.all([
+            const [portfolioRows, accountRows, summary, historyRows, dcaSettings, mappingRows] = await Promise.all([
               apiRequest("/api/portfolios"),
               apiRequest(`/api/accounts?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/portfolio/history?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/dca/settings?portfolio_id=${encodeURIComponent(portfolioId)}`),
+              apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(portfolioId)}`),
             ]);
             setPortfolios(portfolioRows);
             setAccounts(accountRows);
             setApiSummary(summary);
             setPortfolioHistory(historyRows);
+            setSecurityMappings(mappingRows);
+            setMappingDrafts(mappingDraftsFromRows(mappingRows));
             setBaseAmount(toNumber(dcaSettings.base_amount) || 1000);
             setSelectedBenchmark(dcaSettings.preferred_benchmark || "^GSPC");
             setPrices((current) => ({
@@ -914,6 +1080,72 @@
             setStatus(`Backend sync failed: ${error.message}`);
           } finally {
             setApiLoading(false);
+          }
+        }
+
+        function updateSavedMappingDraft(mapping, ticker) {
+          setMappingDrafts((current) => ({
+            ...current,
+            [mapping.normalized_label]: String(ticker || "").toUpperCase(),
+          }));
+        }
+
+        async function saveSecurityMapping(mapping) {
+          const ticker = String(mappingDrafts[mapping.normalized_label] ?? mapping.ticker ?? "").trim().toUpperCase();
+          if (!ticker) return;
+          const tickerChanged = ticker !== mapping.ticker;
+          try {
+            await apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                security_label: mapping.security_label,
+                ticker,
+                provider: tickerChanged ? "manual" : mapping.provider,
+                provider_name: tickerChanged ? null : mapping.provider_name,
+                provider_exchange: tickerChanged ? null : mapping.provider_exchange,
+                provider_quote_type: tickerChanged ? null : mapping.provider_quote_type,
+                provider_currency: tickerChanged ? null : mapping.provider_currency,
+              }),
+            });
+            await refreshBackendData(selectedPortfolioId);
+            setStatus(`Saved mapping for ${mapping.security_label}.`);
+          } catch (error) {
+            setStatus(`Mapping save failed: ${error.message}`);
+          }
+        }
+
+        async function deleteSavedMapping(mapping) {
+          try {
+            await apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(selectedPortfolioId)}&security_label=${encodeURIComponent(mapping.security_label)}`, {
+              method: "DELETE",
+            });
+            await refreshBackendData(selectedPortfolioId);
+            setStatus(`Deleted mapping for ${mapping.security_label}.`);
+          } catch (error) {
+            setStatus(`Mapping delete failed: ${error.message}`);
+          }
+        }
+
+        async function saveNewSecurityMapping() {
+          const securityLabel = String(newMapping.security_label || "").trim();
+          const ticker = String(newMapping.ticker || "").trim().toUpperCase();
+          if (!securityLabel || !ticker) return;
+          try {
+            await apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                security_label: securityLabel,
+                ticker,
+                provider: "manual",
+              }),
+            });
+            setNewMapping({ security_label: "", ticker: "" });
+            await refreshBackendData(selectedPortfolioId);
+            setStatus(`Added mapping for ${securityLabel}.`);
+          } catch (error) {
+            setStatus(`Mapping add failed: ${error.message}`);
           }
         }
 
@@ -1092,7 +1324,7 @@
               <div className="actions">
                 <span className="pill">{apiAvailable ? "Backend connected" : "Demo mode"}</span>
                 <button disabled={apiLoading} onClick={connectBackend}>{apiAvailable ? "Sync API" : "Connect API"}</button>
-                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setStatus("Demo data restored."); }}>Demo data</button>
+                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
                 <button className="primary" onClick={simulateMarket}>Refresh market simulation</button>
               </div>
             </header>
@@ -1137,7 +1369,14 @@
                 <div className="panel">
                   <div className="toolbar">
                     <h2>Holdings</h2>
-                    <span className="subtitle">{holdings.length} open positions</span>
+                    <div className="actions">
+                      <span className="subtitle">{holdings.length} open positions</span>
+                      {apiAvailable && (
+                        <button onClick={() => setMappingEditorOpen((open) => !open)}>
+                          {mappingEditorOpen ? "Hide mappings" : "Edit mappings"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div style={{ overflowX: "auto" }}>
                     <table>
@@ -1176,6 +1415,7 @@
                       </tbody>
                     </table>
                   </div>
+                  {apiAvailable && mappingEditorOpen && renderMappingEditor()}
                 </div>
               </div>
 
