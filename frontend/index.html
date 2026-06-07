@@ -255,7 +255,7 @@
       }
 
       .preview-table {
-        max-height: 260px;
+        max-height: 320px;
         overflow: auto;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -263,17 +263,56 @@
       }
 
       .preview-table table {
-        min-width: 980px;
+        min-width: 760px;
       }
 
-      .mapping-cell {
-        min-width: 260px;
+      .review-detail {
+        min-width: 190px;
         white-space: normal;
       }
 
-      .mapping-cell strong {
+      .preview-outcome {
+        margin-top: 12px;
+      }
+
+      .resolution-tasks {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .task-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--surface-soft);
+      }
+
+      .task-card.invalid {
+        border-color: rgba(161, 59, 59, 0.32);
+        background: #fff7f7;
+      }
+
+      .task-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: flex-start;
+      }
+
+      .task-title {
+        min-width: 0;
+      }
+
+      .task-title strong {
         display: block;
-        margin-bottom: 6px;
+        overflow-wrap: anywhere;
+      }
+
+      .row-list {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 4px;
       }
 
       .mapping-controls {
@@ -281,6 +320,7 @@
         grid-template-columns: minmax(120px, 1fr) auto;
         gap: 6px;
         align-items: center;
+        margin-top: 10px;
       }
 
       .mapping-note {
@@ -297,7 +337,7 @@
 
       .suggestion-row {
         display: grid;
-        grid-template-columns: minmax(70px, auto) minmax(0, 1fr) auto;
+        grid-template-columns: minmax(70px, auto) minmax(0, 1fr) minmax(100px, auto) auto;
         gap: 8px;
         align-items: center;
         border: 1px solid var(--line);
@@ -312,6 +352,12 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .suggestion-source {
+        grid-column: 2 / 4;
+        color: var(--muted);
+        font-size: 11px;
       }
 
       .mapping-editor {
@@ -797,9 +843,13 @@
         const previewRows = importPreview?.rows || [];
         const previewNewRows = previewRows.filter((row) => row.status === "new").length;
         const previewMappingRows = previewRows.filter((row) => row.status === "needs_mapping");
-        const confirmedMappingRows = previewMappingRows.filter((row) => isMappingConfirmed(row));
-        const unresolvedMappingCount = previewMappingRows.length - confirmedMappingRows.length;
-        const canConfirmImport = apiAvailable && pendingImportFile && importPreview && importPreview.error_count === 0 && unresolvedMappingCount === 0 && (previewNewRows > 0 || confirmedMappingRows.length > 0) && !apiLoading;
+        const previewInvalidRows = previewRows.filter((row) => row.status === "invalid");
+        const mappingGroups = useMemo(() => buildMappingGroups(previewMappingRows, mappingSelections), [previewMappingRows, mappingSelections]);
+        const confirmedMappingGroups = mappingGroups.filter((group) => isMappingConfirmed(group));
+        const unresolvedMappingCount = mappingGroups.length - confirmedMappingGroups.length;
+        const confirmImportDisabledReason = getConfirmImportDisabledReason();
+        const canConfirmImport = !confirmImportDisabledReason;
+        const previewOutcome = getPreviewOutcome();
 
         const history = useMemo(() => {
           if (apiAvailable && portfolioHistory.length) {
@@ -841,7 +891,37 @@
         }
 
         function mappingKey(row) {
-          return row.security_label || `row-${row.row_number}`;
+          return row.key || row.security_label || `row-${row.row_number}`;
+        }
+
+        function buildMappingGroups(rows, selections) {
+          const groupsByKey = {};
+          (rows || []).forEach((row) => {
+            const key = mappingKey(row);
+            const existing = groupsByKey[key];
+            if (existing) {
+              existing.rows.push(row);
+              existing.rowNumbers.push(row.row_number);
+              return;
+            }
+            const suggestion = (row.suggestions || [])[0];
+            const selection = selections[key] || {
+              ticker: suggestion?.symbol || "",
+              confirmed: false,
+            };
+            groupsByKey[key] = {
+              key,
+              security_label: row.security_label,
+              rows: [row],
+              rowNumbers: [row.row_number],
+              suggestions: row.suggestions || [],
+              search_error: row.search_error,
+              error: row.error,
+              ticker: selection.ticker,
+              confirmed: selection.confirmed,
+            };
+          });
+          return Object.values(groupsByKey);
         }
 
         function initialMappingSelections(preview) {
@@ -869,6 +949,37 @@
           return Boolean(selection.confirmed && String(selection.ticker || "").trim());
         }
 
+        function getConfirmImportDisabledReason() {
+          if (apiLoading) return "Waiting for the backend to finish.";
+          if (!apiAvailable) return "Connect the backend before confirming an import.";
+          if (!pendingImportFile || !importPreview) return "Choose a CSV or ZIP export to preview first.";
+          if (importPreview.error_count > 0) return `Fix ${importPreview.error_count} invalid row(s) before importing.`;
+          if (unresolvedMappingCount > 0) return `Confirm ${unresolvedMappingCount} mapping task(s) before importing.`;
+          if (previewNewRows === 0 && previewMappingRows.length === 0) return "There are no new rows to import.";
+          return "";
+        }
+
+        function getPreviewOutcome() {
+          if (!importPreview) return "";
+          if (importPreview.error_count > 0) {
+            const wrongExport = previewInvalidRows.some(isWrongExportRow);
+            return wrongExport
+              ? "This file looks like the wrong Fortuneo export type. Use the bourse/investment history export."
+              : `${importPreview.error_count} row(s) need attention before this file can be imported.`;
+          }
+          if (unresolvedMappingCount > 0) {
+            return `${unresolvedMappingCount} mapping task(s) need confirmation. Confirmed mappings apply to every matching label in this preview.`;
+          }
+          if (previewNewRows === 0 && previewMappingRows.length === 0) {
+            return "Everything in this preview already exists, so there is nothing new to import.";
+          }
+          const mappedRows = previewMappingRows.length;
+          const parts = [];
+          if (previewNewRows) parts.push(`${previewNewRows} new row(s)`);
+          if (mappedRows) parts.push(`${mappedRows} mapped row(s)`);
+          return `Ready to import ${parts.join(" and ")}.`;
+        }
+
         function updateMappingTicker(row, ticker) {
           const key = mappingKey(row);
           setMappingSelections((current) => ({
@@ -890,14 +1001,14 @@
 
         function confirmedMappingsPayload() {
           const mappingsByLabel = {};
-          previewMappingRows
-            .filter((row) => isMappingConfirmed(row))
-            .forEach((row) => {
-              const selection = mappingSelection(row);
+          mappingGroups
+            .filter((group) => isMappingConfirmed(group))
+            .forEach((group) => {
+              const selection = mappingSelection(group);
               const ticker = String(selection.ticker || "").trim().toUpperCase();
-              const suggestion = (row.suggestions || []).find((item) => item.symbol === ticker);
-              mappingsByLabel[row.security_label] = {
-                security_label: row.security_label,
+              const suggestion = (group.suggestions || []).find((item) => String(item.symbol || "").toUpperCase() === ticker);
+              mappingsByLabel[group.security_label] = {
+                security_label: group.security_label,
                 ticker,
                 provider: suggestion?.source || "manual",
                 provider_name: suggestion?.name || null,
@@ -909,52 +1020,108 @@
           return Object.values(mappingsByLabel);
         }
 
-        function renderSuggestionRow(row, suggestion) {
-          const details = [suggestion.name, suggestion.exchange, suggestion.currency, suggestion.query ? `query: ${suggestion.query}` : ""].filter(Boolean).join(" - ");
+        function renderSuggestionRow(group, suggestion) {
+          const market = [suggestion.exchange, suggestion.currency, suggestion.quote_type].filter(Boolean).join(" / ") || "-";
+          const source = [suggestion.source, suggestion.query ? `query: ${suggestion.query}` : ""].filter(Boolean).join(" - ");
           return (
-            <div className="suggestion-row" key={`${row.row_number}-${suggestion.symbol}`}>
+            <div className="suggestion-row" key={`${group.key}-${suggestion.symbol}`}>
               <strong>{suggestion.symbol}</strong>
-              <span title={details}>{details || suggestion.source}</span>
-              <button onClick={() => updateMappingTicker(row, suggestion.symbol)}>Use</button>
+              <span title={suggestion.name || suggestion.source}>{suggestion.name || suggestion.source}</span>
+              <span title={market}>{market}</span>
+              <button onClick={() => updateMappingTicker(group, suggestion.symbol)}>Use</button>
+              <div className="suggestion-source">{source || "manual search result"}</div>
             </div>
           );
         }
 
-        function renderMappingCell(row) {
-          const selection = mappingSelection(row);
-          const suggestions = row.suggestions || [];
+        function renderMappingTask(group) {
+          const selection = mappingSelection(group);
+          const suggestions = group.suggestions || [];
           const ticker = selection.ticker || "";
+          const datalistId = `mapping-suggestions-${group.rowNumbers[0]}`;
           return (
-            <div className="mapping-cell">
-              <strong>{row.security_label || "-"}</strong>
+            <div className="task-card" key={group.key}>
+              <div className="task-header">
+                <div className="task-title">
+                  <strong>{group.security_label || "Unlabeled security"}</strong>
+                  <div className="row-list">Rows {group.rowNumbers.join(", ")}</div>
+                </div>
+                <span className={`badge ${selection.confirmed ? "new" : "mapping"}`}>{selection.confirmed ? "Confirmed" : "Mapping"}</span>
+              </div>
               <div className="mapping-note">Confirming saves this ticker mapping for the selected portfolio.</div>
               <div className="mapping-controls">
                 <input
                   type="text"
-                  list={`mapping-suggestions-${row.row_number}`}
+                  list={datalistId}
                   value={ticker}
-                  aria-label={`Ticker for ${row.security_label || "security"}`}
-                  onChange={(event) => updateMappingTicker(row, event.target.value)}
+                  aria-label={`Ticker for ${group.security_label || "security"}`}
+                  onChange={(event) => updateMappingTicker(group, event.target.value)}
                 />
-                <datalist id={`mapping-suggestions-${row.row_number}`}>
+                <datalist id={datalistId}>
                   {suggestions.map((suggestion) => (
                     <option key={suggestion.symbol} value={suggestion.symbol} label={[suggestion.name, suggestion.exchange, suggestion.currency].filter(Boolean).join(" - ")} />
                   ))}
                 </datalist>
-                <button disabled={!String(ticker).trim()} onClick={() => confirmMapping(row)}>
+                <button disabled={!String(ticker).trim()} onClick={() => confirmMapping(group)}>
                   {selection.confirmed ? "Confirmed" : "Confirm"}
                 </button>
               </div>
               {suggestions.length > 0 && (
                 <div className="suggestion-list">
-                  {suggestions.map((suggestion) => renderSuggestionRow(row, suggestion))}
+                  {suggestions.map((suggestion) => renderSuggestionRow(group, suggestion))}
                 </div>
               )}
-              {!row.search_error && suggestions.length === 0 && (
+              {!group.search_error && suggestions.length === 0 && (
                 <div className="mapping-note warning">No Yahoo suggestions found. Type the ticker manually, then confirm.</div>
               )}
-              {row.search_error && <div className="mapping-note negative">Search failed: {row.search_error}. Type the ticker manually, then confirm.</div>}
+              {group.search_error && <div className="mapping-note negative">Search failed: {group.search_error}. Type the ticker manually, then confirm.</div>}
               {selection.confirmed && <div className="mapping-note positive">Mapped to {String(ticker).toUpperCase()}</div>}
+            </div>
+          );
+        }
+
+        function isWrongExportRow(row) {
+          return String(row.error || "").includes("Fortuneo bank-account export");
+        }
+
+        function rowReviewDetail(row) {
+          if (row.status === "needs_mapping") return `Pending mapping: ${row.security_label || "unlabeled security"}`;
+          if (row.status === "invalid") return row.error || "Invalid row";
+          return row.account || row.description || "-";
+        }
+
+        function renderInvalidTask(row) {
+          const wrongExport = isWrongExportRow(row);
+          return (
+            <div className="task-card invalid" key={`invalid-${row.row_number}`}>
+              <div className="task-header">
+                <div className="task-title">
+                  <strong>{wrongExport ? "Wrong Fortuneo export type" : "Invalid row"}</strong>
+                  <div className="row-list">Row {row.row_number}</div>
+                </div>
+                <span className="badge invalid">Blocked</span>
+              </div>
+              <div className="mapping-note negative">
+                {wrongExport
+                  ? "This is a bank-account export. Export the Fortuneo bourse/investment history instead."
+                  : row.error}
+              </div>
+              {wrongExport && <div className="mapping-note">{row.error}</div>}
+            </div>
+          );
+        }
+
+        function renderResolutionTasks() {
+          const taskCount = mappingGroups.length + previewInvalidRows.length;
+          if (!taskCount) return null;
+          return (
+            <div className="resolution-tasks">
+              <div className="toolbar" style={{ marginBottom: 0 }}>
+                <h3>Resolution tasks</h3>
+                <span className="subtitle">{taskCount} task(s)</span>
+              </div>
+              {mappingGroups.map((group) => renderMappingTask(group))}
+              {previewInvalidRows.map((row) => renderInvalidTask(row))}
             </div>
           );
         }
@@ -1455,7 +1622,7 @@
                         </div>
                         <div className="mini-stat">
                           <span className="label">Mappings</span>
-                          <strong className={unresolvedMappingCount ? "warning" : ""}>{confirmedMappingRows.length}/{previewMappingRows.length}</strong>
+                          <strong className={unresolvedMappingCount ? "warning" : ""}>{confirmedMappingGroups.length}/{mappingGroups.length}</strong>
                         </div>
                         <div className="mini-stat">
                           <span className="label">Duplicates</span>
@@ -1466,6 +1633,8 @@
                           <strong className={importPreview.error_count ? "negative" : ""}>{importPreview.error_count}</strong>
                         </div>
                       </div>
+                      {previewOutcome && <div className="note preview-outcome">{previewOutcome}</div>}
+                      {renderResolutionTasks()}
                       <div className="preview-table">
                         <table>
                           <thead>
@@ -1477,7 +1646,7 @@
                               <th>Type</th>
                               <th className="num">Qty</th>
                               <th className="num">Price</th>
-                              <th>Account / Mapping</th>
+                              <th>Review</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1490,8 +1659,8 @@
                                 <td>{row.transaction_type || "-"}</td>
                                 <td className="num">{row.quantity ?? "-"}</td>
                                 <td className="num">{row.price ?? "-"}</td>
-                                <td className={row.status === "needs_mapping" ? "mapping-cell" : ""}>
-                                  {row.status === "needs_mapping" ? renderMappingCell(row) : (row.account || row.error || "-")}
+                                <td className={`review-detail ${row.status === "invalid" ? "negative" : ""}`} title={row.error || row.security_label || row.description || row.account || ""}>
+                                  {rowReviewDetail(row)}
                                 </td>
                               </tr>
                             ))}
@@ -1502,6 +1671,7 @@
                         <button className="primary" disabled={!canConfirmImport} onClick={confirmImport}>Confirm import</button>
                         <button disabled={apiLoading} onClick={clearImportPreview}>Clear</button>
                       </div>
+                      {confirmImportDisabledReason && <p className="status">{confirmImportDisabledReason}</p>}
                     </div>
                   )}
                   <p className="status">{status}</p>
