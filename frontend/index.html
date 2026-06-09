@@ -323,6 +323,14 @@
         margin-top: 10px;
       }
 
+      .mapping-search {
+        display: grid;
+        grid-template-columns: minmax(120px, 1fr) auto;
+        gap: 6px;
+        align-items: center;
+        margin-top: 8px;
+      }
+
       .mapping-note {
         color: var(--muted);
         font-size: 12px;
@@ -358,6 +366,15 @@
         grid-column: 2 / 4;
         color: var(--muted);
         font-size: 11px;
+      }
+
+      .holding-name {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.25;
+        max-width: 240px;
+        overflow-wrap: anywhere;
       }
 
       .mapping-editor {
@@ -743,6 +760,7 @@
       function holdingsFromApi(summary) {
         return (summary.holdings || []).map((holding) => ({
           ticker: holding.ticker,
+          name: holding.name || "",
           quantity: toNumber(holding.quantity),
           cost: toNumber(holding.invested_amount),
           averageCost: toNumber(holding.average_cost),
@@ -993,6 +1011,9 @@
         const [importPreview, setImportPreview] = useState(null);
         const [pendingImportFile, setPendingImportFile] = useState(null);
         const [mappingSelections, setMappingSelections] = useState({});
+        const [mappingSearchDrafts, setMappingSearchDrafts] = useState({});
+        const [mappingSuggestionOverrides, setMappingSuggestionOverrides] = useState({});
+        const [mappingSearchStatus, setMappingSearchStatus] = useState({});
         const [securityMappings, setSecurityMappings] = useState([]);
         const [mappingEditorOpen, setMappingEditorOpen] = useState(false);
         const [mappingDrafts, setMappingDrafts] = useState({});
@@ -1011,7 +1032,10 @@
         const previewNewRows = previewRows.filter((row) => row.status === "new").length;
         const previewMappingRows = previewRows.filter((row) => row.status === "needs_mapping");
         const previewInvalidRows = previewRows.filter((row) => row.status === "invalid");
-        const mappingGroups = useMemo(() => buildMappingGroups(previewMappingRows, mappingSelections), [previewMappingRows, mappingSelections]);
+        const mappingGroups = useMemo(
+          () => buildMappingGroups(previewMappingRows, mappingSelections),
+          [previewMappingRows, mappingSelections, mappingSuggestionOverrides],
+        );
         const confirmedMappingGroups = mappingGroups.filter((group) => isMappingConfirmed(group));
         const unresolvedMappingCount = mappingGroups.length - confirmedMappingGroups.length;
         const confirmImportDisabledReason = getConfirmImportDisabledReason();
@@ -1067,17 +1091,36 @@
           return row.key || row.security_label || `row-${row.row_number}`;
         }
 
+        function mergeSuggestions(items) {
+          const seen = new Set();
+          return (items || []).filter((item) => {
+            const symbol = String(item?.symbol || "").toUpperCase();
+            if (!symbol || seen.has(symbol)) return false;
+            seen.add(symbol);
+            return true;
+          });
+        }
+
         function buildMappingGroups(rows, selections) {
           const groupsByKey = {};
           (rows || []).forEach((row) => {
             const key = mappingKey(row);
+            const suggestions = mergeSuggestions([
+              ...(row.suggestions || []),
+              ...(mappingSuggestionOverrides[key] || []),
+            ]);
             const existing = groupsByKey[key];
             if (existing) {
               existing.rows.push(row);
               existing.rowNumbers.push(row.row_number);
+              existing.suggestions = mergeSuggestions([
+                ...existing.suggestions,
+                ...(row.suggestions || []),
+                ...(mappingSuggestionOverrides[key] || []),
+              ]);
               return;
             }
-            const suggestion = (row.suggestions || [])[0];
+            const suggestion = suggestions[0];
             const selection = selections[key] || {
               ticker: suggestion?.symbol || "",
               confirmed: false,
@@ -1087,7 +1130,7 @@
               security_label: row.security_label,
               rows: [row],
               rowNumbers: [row.row_number],
-              suggestions: row.suggestions || [],
+              suggestions,
               search_error: row.search_error,
               error: row.error,
               ticker: selection.ticker,
@@ -1172,6 +1215,29 @@
           }));
         }
 
+        async function searchMappingSuggestions(group) {
+          const key = mappingKey(group);
+          const query = String(mappingSearchDrafts[key] || group.security_label || "").trim();
+          if (!query) return;
+          setMappingSearchStatus((current) => ({ ...current, [key]: "Searching..." }));
+          try {
+            const results = await apiRequest(`/api/securities/search?query=${encodeURIComponent(query)}&limit=10`);
+            setMappingSuggestionOverrides((current) => ({
+              ...current,
+              [key]: mergeSuggestions([...(current[key] || []), ...results]),
+            }));
+            if (results[0] && !String(mappingSelection(group).ticker || "").trim()) {
+              updateMappingTicker(group, results[0].symbol);
+            }
+            setMappingSearchStatus((current) => ({
+              ...current,
+              [key]: results.length ? `Found ${results.length} result(s) for ${query}.` : `No results for ${query}.`,
+            }));
+          } catch (error) {
+            setMappingSearchStatus((current) => ({ ...current, [key]: `Search failed: ${error.message}` }));
+          }
+        }
+
         function confirmedMappingsPayload() {
           const mappingsByLabel = {};
           mappingGroups
@@ -1212,6 +1278,8 @@
           const suggestions = group.suggestions || [];
           const ticker = selection.ticker || "";
           const datalistId = `mapping-suggestions-${group.rowNumbers[0]}`;
+          const searchDraft = mappingSearchDrafts[group.key] ?? group.security_label ?? "";
+          const searchStatus = mappingSearchStatus[group.key] || "";
           return (
             <div className="task-card" key={group.key}>
               <div className="task-header">
@@ -1239,6 +1307,22 @@
                   {selection.confirmed ? "Confirmed" : "Confirm"}
                 </button>
               </div>
+              <div className="mapping-search">
+                <input
+                  type="text"
+                  value={searchDraft}
+                  aria-label={`Search Yahoo for ${group.security_label || "security"}`}
+                  onChange={(event) => setMappingSearchDrafts((current) => ({ ...current, [group.key]: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      searchMappingSuggestions(group);
+                    }
+                  }}
+                />
+                <button disabled={!searchDraft.trim()} onClick={() => searchMappingSuggestions(group)}>Search</button>
+              </div>
+              {searchStatus && <div className={`mapping-note ${searchStatus.startsWith("Search failed") ? "negative" : ""}`}>{searchStatus}</div>}
               {suggestions.length > 0 && (
                 <div className="suggestion-list">
                   {suggestions.map((suggestion) => renderSuggestionRow(group, suggestion))}
@@ -1642,6 +1726,9 @@
               setPendingImportFile(file);
               setImportPreview(preview);
               setMappingSelections(initialMappingSelections(preview));
+              setMappingSearchDrafts({});
+              setMappingSuggestionOverrides({});
+              setMappingSearchStatus({});
               const newRows = (preview.rows || []).filter((row) => row.status === "new").length;
               const mappingRows = (preview.rows || []).filter((row) => row.status === "needs_mapping").length;
               setStatus(`Reviewed ${preview.row_count} row(s) from ${file.name}: ${newRows} new, ${mappingRows} mapping(s), ${preview.duplicate_count} duplicate(s), ${preview.error_count} error(s).`);
@@ -1689,6 +1776,9 @@
           setImportPreview(null);
           setPendingImportFile(null);
           setMappingSelections({});
+          setMappingSearchDrafts({});
+          setMappingSuggestionOverrides({});
+          setMappingSearchStatus({});
         }
 
         function updatePrice(ticker, value) {
@@ -1821,7 +1911,10 @@
                       <tbody>
                         {holdings.map((holding) => (
                           <tr key={holding.ticker}>
-                            <td><strong>{holding.ticker}</strong></td>
+                            <td>
+                              <strong>{holding.ticker}</strong>
+                              {holding.name && <div className="holding-name">{holding.name}</div>}
+                            </td>
                             <td className="num">{holding.quantity.toFixed(4)}</td>
                             <td className="num">{money(holding.averageCost)}</td>
                             <td className="num">

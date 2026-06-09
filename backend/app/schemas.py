@@ -254,6 +254,7 @@ class MarketHistoryBackfillOut(ApiModel):
 
 class PricedHoldingOut(ApiModel):
     ticker: str
+    name: str | None = None
     quantity: Decimal
     average_cost: Decimal
     current_price: Decimal

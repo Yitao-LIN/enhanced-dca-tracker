@@ -1,4 +1,2 @@
-libellÃ©;OpÃ©ration;Place;Date;QtÃ©;Prix d'Ã©xÃ©;Montant brut;Courtage/PrÃ©lÃ¨vement;Montant net;Devise;
-AMUNDI MSCI WORLD UCITS ETF EUR;Achat comptant;Paris;15/01/2026;3;470,50;1411,50;1,95;-1413,45;EUR;
-LYXOR PEA NASDAQ 100 UCITS ETF;Achat comptant;Paris;16/02/2026;5;42,10;210,50;1,00;-211,50;EUR;
-AMUNDI MSCI WORLD UCITS ETF EUR;Vente comptant;Paris;20/03/2026;1;490,00;490,00;1,95;488,05;EUR;
+libellé;Opération;Place;Date;Qté;Prix d'éxé;Montant brut;Courtage/Prélèvement;Montant net;Devise;
+AMUNDI PEA S&P 500 UCITS ETF ACC;Achat comptant;Paris;04/06/2026;2;55,62;111,24;1,00;-112,24;EUR;

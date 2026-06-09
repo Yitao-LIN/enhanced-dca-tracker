@@ -69,30 +69,22 @@ class CsvImportTests(unittest.TestCase):
         self.assertIn("AMUNDI MSCI WORLD", rows[0].error)
         self.assertIn("needs a ticker mapping", rows[0].error)
 
-    def test_preview_multi_row_fortuneo_bourse_zip_reports_mapping_rows(self):
+    def test_preview_fortuneo_bourse_zip_reports_mapping_row(self):
         rows = preview_transactions_csv((FIXTURES_DIR / "fortuneo_bourse_mapping.zip").read_bytes())
 
-        self.assertEqual(len(rows), 3)
-        self.assertEqual(sum(1 for row in rows if row.security_label), 3)
-        self.assertEqual(
-            {row.security_label for row in rows},
-            {"AMUNDI MSCI WORLD UCITS ETF EUR", "LYXOR PEA NASDAQ 100 UCITS ETF"},
-        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].security_label, "AMUNDI PEA S&P 500 UCITS ETF ACC")
         self.assertTrue(all(row.transaction is None for row in rows))
 
         transactions = parse_transactions_csv(
             (FIXTURES_DIR / "fortuneo_bourse_mapping.zip").read_bytes(),
             security_mappings={
-                "amundi msci world ucits etf eur": "CW8.PA",
-                "lyxor pea nasdaq 100 ucits etf": "PANX.PA",
+                "amundi pea s p 500 ucits etf acc": "PSP5.PA",
             },
         )
 
-        self.assertEqual([transaction.ticker for transaction in transactions], ["CW8.PA", "PANX.PA", "CW8.PA"])
-        self.assertEqual(
-            [transaction.transaction_type for transaction in transactions],
-            [TransactionType.BUY, TransactionType.BUY, TransactionType.SELL],
-        )
+        self.assertEqual([transaction.ticker for transaction in transactions], ["PSP5.PA"])
+        self.assertEqual([transaction.transaction_type for transaction in transactions], [TransactionType.BUY])
 
     def test_parse_fortuneo_bourse_with_security_mapping(self):
         csv_text = (
@@ -146,9 +138,9 @@ class CsvImportTests(unittest.TestCase):
 class PortfolioTests(unittest.TestCase):
     def test_build_holdings_reduces_cost_basis_on_sell(self):
         transactions = parse_transactions_csv(
-            """Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise
-15/01/2026;Achat;CW8.PA;3;100,00;3,00;EUR
-20/02/2026;Vente;CW8.PA;1;120,00;1,00;EUR
+            """Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Libelle
+15/01/2026;Achat;CW8.PA;3;100,00;3,00;EUR;AMUNDI MSCI WORLD
+20/02/2026;Vente;CW8.PA;1;120,00;1,00;EUR;AMUNDI MSCI WORLD
 """
         )
 
@@ -157,6 +149,7 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(len(holdings), 1)
         self.assertEqual(holdings[0].quantity, Decimal("2"))
         self.assertEqual(holdings[0].average_cost, Decimal("101.00"))
+        self.assertEqual(holdings[0].name, "AMUNDI MSCI WORLD")
 
     def test_summarize_portfolio_prices_holdings(self):
         transactions = parse_transactions_csv(

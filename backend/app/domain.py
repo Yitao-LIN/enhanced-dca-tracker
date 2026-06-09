@@ -54,12 +54,14 @@ class Holding:
     quantity: Decimal
     average_cost: Decimal
     invested_amount: Decimal
+    name: str | None = None
     currency: str = "EUR"
 
 
 @dataclass(frozen=True)
 class PricedHolding:
     ticker: str
+    name: str | None
     quantity: Decimal
     average_cost: Decimal
     current_price: Decimal

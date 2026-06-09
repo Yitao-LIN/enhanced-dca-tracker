@@ -15,7 +15,7 @@ from app.domain import (
 
 def build_holdings(transactions: list[Transaction]) -> list[Holding]:
     lots: dict[str, dict[str, Decimal | str]] = defaultdict(
-        lambda: {"quantity": Decimal("0"), "cost": Decimal("0"), "currency": "EUR"}
+        lambda: {"quantity": Decimal("0"), "cost": Decimal("0"), "currency": "EUR", "name": ""}
     )
 
     for transaction in sorted(transactions, key=lambda item: item.transaction_date):
@@ -30,6 +30,8 @@ def build_holdings(transactions: list[Transaction]) -> list[Holding]:
             quantity += transaction.quantity
             cost += transaction.gross_amount + transaction.fees
             position["currency"] = transaction.currency
+            if transaction.description and not str(position["name"]).strip():
+                position["name"] = transaction.description
         elif transaction.transaction_type == TransactionType.SELL and quantity > 0:
             average_cost = cost / quantity
             sold_quantity = min(transaction.quantity, quantity)
@@ -51,6 +53,7 @@ def build_holdings(transactions: list[Transaction]) -> list[Holding]:
                 quantity=quantity,
                 average_cost=quantize_money(cost / quantity),
                 invested_amount=cost,
+                name=str(position["name"]).strip() or None,
                 currency=str(position["currency"]),
             )
         )
@@ -81,6 +84,7 @@ def summarize_portfolio(transactions: list[Transaction], current_prices: dict[st
         priced_holdings.append(
             PricedHolding(
                 ticker=holding.ticker,
+                name=holding.name,
                 quantity=holding.quantity,
                 average_cost=holding.average_cost,
                 current_price=quantize_money(current_price),

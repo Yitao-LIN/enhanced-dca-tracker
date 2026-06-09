@@ -461,10 +461,10 @@ class ApiRouteTests(unittest.TestCase):
     def test_preview_retries_cleaned_query_when_raw_search_has_no_results(self):
         provider = StubSearchProvider(
             results_by_query={
-                "AMUNDI MSCI WORLD": [
+                "AMUNDI PEA S&P 500": [
                     SymbolSearchResult(
-                        symbol="CW8.PA",
-                        name="Amundi MSCI World UCITS ETF",
+                        symbol="PSP5.PA",
+                        name="Amundi PEA S&P 500 UCITS ETF Acc",
                         exchange="PAR",
                         quote_type="ETF",
                         currency="EUR",
@@ -483,10 +483,10 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         row = response.json()["rows"][0]
         self.assertEqual(row["status"], "needs_mapping")
-        self.assertEqual(row["suggestions"][0]["symbol"], "CW8.PA")
-        self.assertEqual(row["suggestions"][0]["query"], "AMUNDI MSCI WORLD")
-        self.assertIn(("AMUNDI MSCI WORLD UCITS ETF EUR", 5), provider.queries)
-        self.assertIn(("AMUNDI MSCI WORLD", 5), provider.queries)
+        self.assertEqual(row["suggestions"][0]["symbol"], "PSP5.PA")
+        self.assertEqual(row["suggestions"][0]["query"], "AMUNDI PEA S&P 500")
+        self.assertIn(("AMUNDI PEA S&P 500 UCITS ETF ACC", 5), provider.queries)
+        self.assertIn(("AMUNDI PEA S&P 500", 5), provider.queries)
 
     def test_upload_persists_confirmed_mapping_and_reuses_it(self):
         mapping_payload = [
@@ -514,6 +514,11 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(transactions.json()[0]["ticker"], "CW8.PA")
         self.assertEqual(transactions.json()[0]["description"], "AMUNDI MSCI WORLD")
 
+        self.client.put("/api/market/prices", json={"prices": {"CW8.PA": "500"}})
+        summary = self.client.get("/api/portfolio?portfolio_id=default")
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.json()["holdings"][0]["name"], "AMUNDI MSCI WORLD")
+
         app.dependency_overrides[get_symbol_search_provider] = lambda: StubSearchProvider(error=RuntimeError("offline"))
         preview = self.client.post(
             "/api/transactions/preview?portfolio_id=default",
@@ -525,9 +530,8 @@ class ApiRouteTests(unittest.TestCase):
 
     def test_upload_deduplicates_repeated_confirmed_mapping_labels(self):
         mapping_payload = [
-            {"security_label": "AMUNDI MSCI WORLD UCITS ETF EUR", "ticker": "CW8.PA", "provider": "manual"},
-            {"security_label": "LYXOR PEA NASDAQ 100 UCITS ETF", "ticker": "PANX.PA", "provider": "manual"},
-            {"security_label": "AMUNDI MSCI WORLD UCITS ETF EUR", "ticker": "CW8.PA", "provider": "manual"},
+            {"security_label": "AMUNDI PEA S&P 500 UCITS ETF ACC", "ticker": "PSP5.PA", "provider": "manual"},
+            {"security_label": "AMUNDI PEA S&P 500 UCITS ETF ACC", "ticker": "PSP5.PA", "provider": "manual"},
         ]
 
         upload = self.client.post(
@@ -537,15 +541,14 @@ class ApiRouteTests(unittest.TestCase):
         )
 
         self.assertEqual(upload.status_code, 200)
-        self.assertEqual(upload.json()["imported"], 3)
+        self.assertEqual(upload.json()["imported"], 1)
 
         mappings = self.client.get("/api/security-mappings?portfolio_id=default")
         self.assertEqual(mappings.status_code, 200)
         self.assertEqual(
             {mapping["security_label"]: mapping["ticker"] for mapping in mappings.json()},
             {
-                "AMUNDI MSCI WORLD UCITS ETF EUR": "CW8.PA",
-                "LYXOR PEA NASDAQ 100 UCITS ETF": "PANX.PA",
+                "AMUNDI PEA S&P 500 UCITS ETF ACC": "PSP5.PA",
             },
         )
 

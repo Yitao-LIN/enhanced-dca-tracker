@@ -7,7 +7,7 @@ These fixtures are synthetic. They are designed to be small, private, and stable
 - `fortuneo_golden.csv`: main Fortuneo-style transaction fixture.
 - `fortuneo_duplicate_rows.csv`: tiny CSV with an intentional duplicate inside the same upload.
 - `HistoriqueOperationsBourse_mapping.csv`: source CSV for the synthetic Fortuneo bourse ZIP mapping fixture.
-- `fortuneo_bourse_mapping.zip`: Fortuneo bourse ZIP shape with multiple rows that need ticker mappings.
+- `fortuneo_bourse_mapping.zip`: Fortuneo bourse ZIP shape with one row that needs a ticker mapping.
 - `market_history_basic.json`: manual historical prices for holdings plus S&P 500 and Nasdaq 100 benchmark series.
 - `expected_portfolio_summary.json`: exact portfolio summary expected after importing `fortuneo_golden.csv` and applying the latest prices in `market_history_basic.json`.
 - `expected_import_preview.json`: suggested import-preview shape for the golden CSV.
@@ -25,6 +25,6 @@ The golden CSV covers:
 - French decimal formatting;
 - optional account and description fields.
 
-The synthetic bourse ZIP covers real Fortuneo bourse headers with security labels but no ticker column. It is safe mock data and should be used instead of real account exports for regression tests.
+The synthetic bourse ZIP mirrors the private Fortuneo bourse export format: one ISO-8859-1 `HistoriqueOperationsBourse_...csv` member, real bourse headers, a trailing empty column, and a security label with no ticker column. It is safe mock data and should be used instead of real account exports for regression tests.
 
 Money values in expected JSON files are stored as strings to keep decimal precision exact.
