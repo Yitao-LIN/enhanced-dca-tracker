@@ -218,9 +218,9 @@ The `alembic_version` table is important because it proves Alembic has marked th
 Run:
 
 ```powershell
+cd "X:\My Finance\Tracker"
 $env:INVESTMENT_TRACKER_DATABASE_URL = "sqlite:///X:/My Finance/Tracker/.local/startup-test.sqlite3"
-cd "X:\My Finance\Tracker\backend"
-.\.venv\Scripts\uvicorn.exe app.main:app --reload
+.\start_backend.bat
 ```
 
 Then open:
@@ -252,9 +252,8 @@ Expected terminal behavior:
 Start the backend:
 
 ```powershell
-cd "X:\My Finance\Tracker\backend"
-.\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload
+cd "X:\My Finance\Tracker"
+.\start_backend.bat
 ```
 
 From another terminal, upload the sample CSV:

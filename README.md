@@ -88,6 +88,18 @@ python -m pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+After the virtual environment exists, the quickest way to start the backend from the repository root is:
+
+```powershell
+.\start_backend.bat
+```
+
+It serves FastAPI at `http://127.0.0.1:8000` and stores local testing data in `.local/tracker-dev.sqlite3` unless `INVESTMENT_TRACKER_DATABASE_URL` is already set. To use another port:
+
+```powershell
+.\start_backend.bat 8766
+```
+
 By default, FastAPI stores data in SQLite at:
 
 ```text
