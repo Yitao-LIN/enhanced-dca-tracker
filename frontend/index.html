@@ -378,6 +378,29 @@
         flex-wrap: nowrap;
       }
 
+      .hidden-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .hidden-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 8px;
+        background: var(--surface-soft);
+        font-size: 12px;
+      }
+
+      .hidden-item button {
+        min-height: 28px;
+        padding: 0 8px;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -404,6 +427,7 @@
       }
 
       .chart {
+        position: relative;
         height: 270px;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -419,6 +443,7 @@
 
       .legend {
         display: flex;
+        flex-wrap: wrap;
         gap: 14px;
         color: var(--muted);
         font-size: 12px;
@@ -429,6 +454,32 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
+      }
+
+      .key input {
+        margin: 0;
+      }
+
+      .range-tabs {
+        display: inline-flex;
+        gap: 4px;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-soft);
+      }
+
+      .range-tabs button {
+        min-height: 30px;
+        border-color: transparent;
+        background: transparent;
+        padding: 0 9px;
+      }
+
+      .range-tabs button.active {
+        border-color: var(--line);
+        background: var(--surface);
+        color: var(--blue);
       }
 
       .dot {
@@ -508,6 +559,14 @@
     <script type="text/babel">
       const { useEffect, useMemo, useState } = React;
       const API_BASE_URL = localStorage.getItem("trackerApiBaseUrl") || "http://127.0.0.1:8000";
+      const BENCHMARK_SYMBOLS = ["^GSPC", "^NDX"];
+      const CHART_RANGES = [
+        { key: "1d", label: "1D", days: 1 },
+        { key: "5d", label: "5D", days: 5 },
+        { key: "30d", label: "30D", days: 30 },
+        { key: "1y", label: "1Y", yearStart: true },
+        { key: "all", label: "Since start", days: null },
+      ];
 
       const sampleCsv = `Date operation;Operation;Code valeur;Quantite;Prix unitaire;Frais;Devise;Compte;Libelle
 15/01/2026;Achat;CW8.PA;3;470,50;1,95;EUR;PEA;Amundi MSCI World
@@ -551,6 +610,31 @@
       function toNumber(value) {
         const number = Number(value);
         return Number.isFinite(number) ? number : 0;
+      }
+
+      function isoDate(date) {
+        return date.toISOString().slice(0, 10);
+      }
+
+      function chartDateRange(rangeKey) {
+        const end = new Date();
+        const range = CHART_RANGES.find((item) => item.key === rangeKey) || CHART_RANGES[3];
+        const params = { end_date: isoDate(end) };
+        if (range.yearStart) {
+          params.start_date = isoDate(new Date(end.getFullYear(), 0, 1));
+        } else if (range.days !== null) {
+          const start = new Date(end);
+          start.setDate(start.getDate() - range.days);
+          params.start_date = isoDate(start);
+        }
+        return params;
+      }
+
+      function queryString(params) {
+        return Object.entries(params)
+          .filter(([, value]) => value !== undefined && value !== null && value !== "")
+          .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+          .join("&");
       }
 
       async function apiRequest(path, options = {}) {
@@ -741,12 +825,18 @@
         return Array.from(indexes).sort((a, b) => a - b);
       }
 
-      function LineChart({ data }) {
+      function LineChart({ data, visibleBenchmarks }) {
+        const [hoverPoint, setHoverPoint] = useState(null);
         const width = 820;
         const height = 270;
-        const pad = 34;
-        const series = ["invested", "value", "sp500", "nasdaq100"];
-        const values = data.flatMap((item) => series.map((key) => item[key]).filter((value) => Number.isFinite(value)));
+        const pad = 42;
+        const series = [
+          { key: "value", label: "Value", color: "#185fa5", width: 3 },
+          { key: "invested", label: "Invested", color: "#8090a5", width: 2.5, dash: "6 5" },
+          ...(visibleBenchmarks.sp500 ? [{ key: "sp500", label: "S&P 500", color: "#1c8c5a", width: 2.5, dash: "7 5" }] : []),
+          ...(visibleBenchmarks.nasdaq100 ? [{ key: "nasdaq100", label: "Nasdaq 100", color: "#b45f06", width: 2.5, dash: "4 5" }] : []),
+        ];
+        const values = data.flatMap((item) => series.map((serie) => item[serie.key]).filter((value) => Number.isFinite(value)));
         const max = Math.max(...values, 1);
         const min = Math.min(...values, 0);
         const rangeDays = chartRangeDays(data);
@@ -768,23 +858,97 @@
             .filter(Boolean)
             .join(" ");
         };
+        const handleHover = (event) => {
+          if (!data.length || !values.length) {
+            setHoverPoint(null);
+            return;
+          }
+          const rect = event.currentTarget.getBoundingClientRect();
+          const pointerX = ((event.clientX - rect.left) / rect.width) * width;
+          const pointerY = ((event.clientY - rect.top) / rect.height) * height;
+          let nearest = null;
+          data.forEach((item, index) => {
+            series.forEach((serie) => {
+              const value = item[serie.key];
+              if (!Number.isFinite(value)) return;
+              const pointX = x(index);
+              const pointY = y(value);
+              const distance = Math.hypot(pointX - pointerX, pointY - pointerY);
+              if (!nearest || distance < nearest.distance) {
+                nearest = {
+                  ...serie,
+                  date: item.date || item.month || "",
+                  value,
+                  x: pointX,
+                  y: pointY,
+                  distance,
+                };
+              }
+            });
+          });
+          setHoverPoint(nearest);
+        };
+
+        if (!data.length || !values.length) {
+          return (
+            <div className="chart">
+              <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Portfolio performance chart">
+                <text x={width / 2} y={height / 2} textAnchor="middle" fontSize="13" fill="#627083">
+                  No visible history for this range.
+                </text>
+              </svg>
+            </div>
+          );
+        }
 
         return (
           <div className="chart">
-            <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Portfolio performance chart">
+            <svg
+              viewBox={`0 0 ${width} ${height}`}
+              role="img"
+              aria-label="Portfolio performance chart"
+              onMouseMove={handleHover}
+              onMouseLeave={() => setHoverPoint(null)}
+            >
               {[0, 1, 2, 3].map((line) => {
                 const yy = pad + line * ((height - pad * 2) / 3);
                 return <line key={line} x1={pad} y1={yy} x2={width - pad} y2={yy} stroke="#d8dde5" />;
               })}
-              <path d={path("value")} fill="none" stroke="#185fa5" strokeWidth="3" />
-              <path d={path("invested")} fill="none" stroke="#8090a5" strokeWidth="2.5" strokeDasharray="6 5" />
-              {path("sp500") && <path d={path("sp500")} fill="none" stroke="#1c8c5a" strokeWidth="2.5" strokeDasharray="7 5" />}
-              {path("nasdaq100") && <path d={path("nasdaq100")} fill="none" stroke="#b45f06" strokeWidth="2.5" strokeDasharray="4 5" />}
+              {series.map((serie) => {
+                const d = path(serie.key);
+                return d ? (
+                  <path
+                    key={serie.key}
+                    d={d}
+                    fill="none"
+                    stroke={serie.color}
+                    strokeWidth={serie.width}
+                    strokeDasharray={serie.dash}
+                  />
+                ) : null;
+              })}
               {tickIndexes.map((index) => (
                 <text key={`${data[index]?.date || data[index]?.month}-${index}`} x={x(index)} y={height - 10} textAnchor="middle" fontSize="11" fill="#627083">
                   {data[index]?.date ? chartDateLabel(data[index].date, rangeDays) : data[index]?.month}
                 </text>
               ))}
+              {hoverPoint && (
+                <g>
+                  <line x1={hoverPoint.x} y1={pad} x2={hoverPoint.x} y2={height - pad} stroke="#9aa5b1" strokeDasharray="4 4" />
+                  <circle cx={hoverPoint.x} cy={hoverPoint.y} r="5" fill={hoverPoint.color} stroke="#ffffff" strokeWidth="2" />
+                  <rect x="6" y={Math.max(16, hoverPoint.y - 14)} width="88" height="28" rx="7" fill="#ffffff" stroke="#d8dde5" />
+                  <text x="50" y={Math.max(34, hoverPoint.y + 4)} textAnchor="middle" fontSize="12" fill={hoverPoint.color}>
+                    {money(hoverPoint.value)}
+                  </text>
+                  <rect x={Math.min(width - 190, hoverPoint.x + 10)} y={Math.max(12, hoverPoint.y - 42)} width="176" height="36" rx="7" fill="#ffffff" stroke="#d8dde5" />
+                  <text x={Math.min(width - 178, hoverPoint.x + 22)} y={Math.max(30, hoverPoint.y - 21)} fontSize="12" fill="#182230">
+                    {hoverPoint.label}
+                  </text>
+                  <text x={Math.min(width - 178, hoverPoint.x + 22)} y={Math.max(45, hoverPoint.y - 6)} fontSize="11" fill="#627083">
+                    {hoverPoint.date ? `${hoverPoint.date} - ${money(hoverPoint.value)}` : money(hoverPoint.value)}
+                  </text>
+                </g>
+              )}
             </svg>
           </div>
         );
@@ -818,6 +982,9 @@
         const [accounts, setAccounts] = useState([]);
         const [selectedPortfolioId, setSelectedPortfolioId] = useState("default");
         const [portfolioHistory, setPortfolioHistory] = useState([]);
+        const [chartRange, setChartRange] = useState("1y");
+        const [visibleBenchmarks, setVisibleBenchmarks] = useState({ sp500: true, nasdaq100: true });
+        const [hiddenSecurities, setHiddenSecurities] = useState([]);
         const [selectedBenchmark, setSelectedBenchmark] = useState("^GSPC");
         const [apiDca, setApiDca] = useState(null);
         const [baseAmount, setBaseAmount] = useState(1000);
@@ -879,9 +1046,15 @@
         useEffect(() => {
           if (apiAvailable) {
             clearImportPreview();
-            refreshBackendData(selectedPortfolioId);
+            refreshBackendData(selectedPortfolioId, { autoBackfill: true });
           }
         }, [selectedPortfolioId]);
+
+        useEffect(() => {
+          if (apiAvailable) {
+            refreshBackendData(selectedPortfolioId, { autoBackfill: false, quiet: true });
+          }
+        }, [chartRange]);
 
         function mappingDraftsFromRows(rows) {
           return (rows || []).reduce((drafts, mapping) => {
@@ -1205,8 +1378,8 @@
           try {
             await apiRequest("/api/health");
             setApiAvailable(true);
-            await refreshBackendData(selectedPortfolioId);
             setStatus(`Connected to backend at ${API_BASE_URL}.`);
+            await refreshBackendData(selectedPortfolioId, { autoBackfill: true });
           } catch (error) {
             setApiAvailable(false);
             setStatus("Backend unavailable. Demo mode is active.");
@@ -1215,22 +1388,32 @@
           }
         }
 
-        async function refreshBackendData(portfolioId = selectedPortfolioId) {
+        function historyQuery(portfolioId = selectedPortfolioId) {
+          return queryString({
+            portfolio_id: portfolioId,
+            ...chartDateRange(chartRange),
+          });
+        }
+
+        async function refreshBackendData(portfolioId = selectedPortfolioId, options = {}) {
+          const { autoBackfill = false, quiet = false } = options;
           setApiLoading(true);
           try {
-            const [portfolioRows, accountRows, summary, historyRows, dcaSettings, mappingRows] = await Promise.all([
+            const [portfolioRows, accountRows, summary, historyRows, dcaSettings, mappingRows, hiddenRows] = await Promise.all([
               apiRequest("/api/portfolios"),
               apiRequest(`/api/accounts?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
-              apiRequest(`/api/portfolio/history?portfolio_id=${encodeURIComponent(portfolioId)}`),
+              apiRequest(`/api/portfolio/history?${historyQuery(portfolioId)}`),
               apiRequest(`/api/dca/settings?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(portfolioId)}`),
+              apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(portfolioId)}`),
             ]);
             setPortfolios(portfolioRows);
             setAccounts(accountRows);
             setApiSummary(summary);
             setPortfolioHistory(historyRows);
             setSecurityMappings(mappingRows);
+            setHiddenSecurities(hiddenRows);
             setMappingDrafts(mappingDraftsFromRows(mappingRows));
             setBaseAmount(toNumber(dcaSettings.base_amount) || 1000);
             setSelectedBenchmark(dcaSettings.preferred_benchmark || "^GSPC");
@@ -1242,6 +1425,24 @@
               }, {}),
             }));
             setApiAvailable(true);
+            if (autoBackfill) {
+              const result = await backfillMarketHistory(portfolioId, summary.holdings || [], historyRows);
+              if (result) {
+                const refreshed = await Promise.all([
+                  apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
+                  apiRequest(`/api/portfolio/history?${historyQuery(portfolioId)}`),
+                  apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(portfolioId)}`),
+                ]);
+                setApiSummary(refreshed[0]);
+                setPortfolioHistory(refreshed[1]);
+                setHiddenSecurities(refreshed[2]);
+                if (!quiet) {
+                  const skipped = result.failures || [];
+                  const skippedText = skipped.length ? ` Skipped ${skipped.map((failure) => failure.symbol).join(", ")}.` : "";
+                  setStatus(`Backfilled ${result.updated} market history row(s).${skippedText}`);
+                }
+              }
+            }
           } catch (error) {
             setApiAvailable(false);
             setStatus(`Backend sync failed: ${error.message}`);
@@ -1316,31 +1517,67 @@
           }
         }
 
-        async function backfillBenchmarks() {
-          if (!apiAvailable) return;
-          setApiLoading(true);
-          const end = new Date();
-          const start = new Date();
-          start.setFullYear(end.getFullYear() - 1);
+        async function hideSecurity(ticker) {
+          const symbol = String(ticker || "").trim().toUpperCase();
+          if (!apiAvailable || !symbol) return;
+          try {
+            await apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ticker: symbol }),
+            });
+            await refreshBackendData(selectedPortfolioId, { autoBackfill: false });
+            setStatus(`${symbol} hidden from tracking.`);
+          } catch (error) {
+            setStatus(`Hide failed: ${error.message}`);
+          }
+        }
+
+        async function restoreSecurity(ticker) {
+          const symbol = String(ticker || "").trim().toUpperCase();
+          if (!apiAvailable || !symbol) return;
+          try {
+            await apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(selectedPortfolioId)}&ticker=${encodeURIComponent(symbol)}`, {
+              method: "DELETE",
+            });
+            await refreshBackendData(selectedPortfolioId, { autoBackfill: false });
+            setStatus(`${symbol} restored to tracking.`);
+          } catch (error) {
+            setStatus(`Restore failed: ${error.message}`);
+          }
+        }
+
+        async function backfillMarketHistory(portfolioId, visibleHoldings, historyRows = []) {
+          const symbols = Array.from(new Set([
+            ...(visibleHoldings || []).map((holding) => holding.ticker),
+            ...BENCHMARK_SYMBOLS,
+          ].filter(Boolean).map((symbol) => String(symbol).toUpperCase()))).sort();
+          if (!symbols.length) return null;
+          const range = chartDateRange(chartRange);
+          if (!range.start_date) {
+            range.start_date = historyRows[0]?.date;
+            if (!range.start_date) {
+              const start = new Date();
+              start.setFullYear(start.getFullYear() - 5);
+              range.start_date = isoDate(start);
+            }
+          }
           try {
             const payload = {
-              symbols: ["^GSPC", "^NDX"],
-              start_date: start.toISOString().slice(0, 10),
-              end_date: end.toISOString().slice(0, 10),
+              symbols,
+              start_date: range.start_date,
+              end_date: range.end_date,
               currency: "USD",
               source: "yfinance",
             };
-            const result = await apiRequest("/api/market/history/backfill", {
+            return await apiRequest("/api/market/history/backfill", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             });
-            await refreshBackendData(selectedPortfolioId);
-            setStatus(`Backfilled ${result.updated} benchmark price row(s) for S&P 500 and Nasdaq 100.`);
           } catch (error) {
-            setStatus(`Benchmark backfill failed: ${error.message}`);
-          } finally {
-            setApiLoading(false);
+            setStatus(`Automatic market backfill failed: ${error.message}`);
+            return null;
           }
         }
 
@@ -1439,7 +1676,7 @@
               body: formData,
             });
             clearImportPreview();
-            await refreshBackendData(selectedPortfolioId);
+            await refreshBackendData(selectedPortfolioId, { autoBackfill: true });
             setStatus(`Imported ${summary.imported} row(s), skipped ${summary.duplicates} duplicate(s) from ${file.name}.`);
           } catch (error) {
             setStatus(`Import failed: ${error.message}`);
@@ -1491,7 +1728,7 @@
               <div className="actions">
                 <span className="pill">{apiAvailable ? "Backend connected" : "Demo mode"}</span>
                 <button disabled={apiLoading} onClick={connectBackend}>{apiAvailable ? "Sync API" : "Connect API"}</button>
-                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
+                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setHiddenSecurities([]); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
                 <button className="primary" onClick={simulateMarket}>Refresh market simulation</button>
               </div>
             </header>
@@ -1520,17 +1757,39 @@
                 <div className="panel">
                   <div className="toolbar">
                     <h2>Portfolio Performance</h2>
-                    <div className="legend">
-                      <span className="key"><span className="dot" style={{ background: "#8090a5" }} />Invested</span>
-                      <span className="key"><span className="dot" style={{ background: "#185fa5" }} />Value</span>
-                      <span className="key"><span className="dot" style={{ background: "#1c8c5a" }} />S&P 500</span>
-                      <span className="key"><span className="dot" style={{ background: "#b45f06" }} />Nasdaq 100</span>
+                    <div className="range-tabs" role="group" aria-label="Chart range">
+                      {CHART_RANGES.map((range) => (
+                        <button
+                          key={range.key}
+                          className={chartRange === range.key ? "active" : ""}
+                          onClick={() => setChartRange(range.key)}
+                        >
+                          {range.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <LineChart data={history} />
-                  {apiAvailable && (
-                    <button disabled={apiLoading} style={{ marginTop: 12 }} onClick={backfillBenchmarks}>Backfill benchmarks</button>
-                  )}
+                  <LineChart data={history} visibleBenchmarks={visibleBenchmarks} />
+                  <div className="legend">
+                    <span className="key"><span className="dot" style={{ background: "#8090a5" }} />Invested</span>
+                    <span className="key"><span className="dot" style={{ background: "#185fa5" }} />Value</span>
+                    <label className="key">
+                      <input
+                        type="checkbox"
+                        checked={visibleBenchmarks.sp500}
+                        onChange={(event) => setVisibleBenchmarks((current) => ({ ...current, sp500: event.target.checked }))}
+                      />
+                      <span className="dot" style={{ background: "#1c8c5a" }} />S&P 500
+                    </label>
+                    <label className="key">
+                      <input
+                        type="checkbox"
+                        checked={visibleBenchmarks.nasdaq100}
+                        onChange={(event) => setVisibleBenchmarks((current) => ({ ...current, nasdaq100: event.target.checked }))}
+                      />
+                      <span className="dot" style={{ background: "#b45f06" }} />Nasdaq 100
+                    </label>
+                  </div>
                 </div>
 
                 <div className="panel">
@@ -1556,6 +1815,7 @@
                           <th className="num">Value</th>
                           <th className="num">Gain</th>
                           <th className="num">Allocation</th>
+                          {apiAvailable && <th>Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -1577,11 +1837,37 @@
                             <td className="num">{money(holding.value)}</td>
                             <td className={`num ${holding.gain >= 0 ? "positive" : "negative"}`}>{money(holding.gain)} ({percent(holding.gainPercent)})</td>
                             <td className="num">{holding.allocation.toFixed(1)}%</td>
+                            {apiAvailable && (
+                              <td>
+                                <button disabled={apiLoading} onClick={() => hideSecurity(holding.ticker)}>Hide</button>
+                              </td>
+                            )}
                           </tr>
                         ))}
+                        {!holdings.length && (
+                          <tr>
+                            <td colSpan={apiAvailable ? 8 : 7} className="mapping-note">No visible holdings.</td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
+                  {apiAvailable && hiddenSecurities.length > 0 && (
+                    <div className="mapping-editor">
+                      <div className="toolbar">
+                        <h3>Hidden from tracking</h3>
+                        <span className="subtitle">{hiddenSecurities.length} hidden</span>
+                      </div>
+                      <div className="hidden-list">
+                        {hiddenSecurities.map((security) => (
+                          <span className="hidden-item" key={security.ticker}>
+                            <strong>{security.ticker}</strong>
+                            <button disabled={apiLoading} onClick={() => restoreSecurity(security.ticker)}>Restore</button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {apiAvailable && mappingEditorOpen && renderMappingEditor()}
                 </div>
               </div>

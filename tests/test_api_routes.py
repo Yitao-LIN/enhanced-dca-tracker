@@ -2,8 +2,10 @@ import io
 import json
 import unittest
 import zipfile
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -12,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app, get_symbol_search_provider
-from app.services.market_data import SymbolSearchResult
+from app.services.market_data import HistoricalMarketPrice, SymbolSearchResult
 import app.models as models  # noqa: F401
 
 
@@ -66,6 +68,21 @@ class StubSearchProvider:
         if query in self.results_by_query:
             return self.results_by_query[query][:limit]
         return self.results[:limit]
+
+
+class StubHistoryProvider:
+    def historical_prices(self, symbol: str, start_date, end_date, currency: str = "USD", source: str = "yfinance"):
+        if symbol == "PSP5":
+            raise ValueError("No historical market data returned for PSP5")
+        return [
+            HistoricalMarketPrice(
+                symbol=symbol,
+                price_date=date(2026, 6, 1),
+                close=Decimal("100"),
+                currency=currency,
+                source=source,
+            )
+        ]
 
 
 class ApiRouteTests(unittest.TestCase):
@@ -204,6 +221,51 @@ class ApiRouteTests(unittest.TestCase):
             self.assertDecimalEqual(actual["unrealized_gain_percent"], expected_holding["unrealized_gain_percent"])
             self.assertDecimalEqual(actual["allocation_percent"], expected_holding["allocation_percent"])
 
+    def test_hidden_security_routes_filter_summary_without_deleting_transactions(self):
+        market_history = load_json("market_history_basic.json")
+        self._upload_golden_csv()
+        self.client.put("/api/market/prices", json={"prices": market_history["latest_prices"]})
+
+        hidden = self.client.put("/api/hidden-securities?portfolio_id=default", json={"ticker": "cw8.pa"})
+        self.assertEqual(hidden.status_code, 200)
+        self.assertEqual(hidden.json()["ticker"], "CW8.PA")
+
+        listed = self.client.get("/api/hidden-securities?portfolio_id=default")
+        self.assertEqual([record["ticker"] for record in listed.json()], ["CW8.PA"])
+
+        self.client.post("/api/portfolios", json={"name": "Long Term", "slug": "long-term"})
+        long_term_hidden = self.client.put("/api/hidden-securities?portfolio_id=long-term", json={"ticker": "wrd.pa"})
+        self.assertEqual(long_term_hidden.status_code, 200)
+        self.assertEqual(
+            [record["ticker"] for record in self.client.get("/api/hidden-securities?portfolio_id=default").json()],
+            ["CW8.PA"],
+        )
+        self.assertEqual(
+            [record["ticker"] for record in self.client.get("/api/hidden-securities?portfolio_id=long-term").json()],
+            ["WRD.PA"],
+        )
+
+        summary = self.client.get("/api/portfolio?portfolio_id=default")
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual([holding["ticker"] for holding in summary.json()["holdings"]], ["EWLD.PA", "VEUR.AS"])
+        self.assertDecimalEqual(summary.json()["total_value"], "429.60")
+        self.assertDecimalEqual(summary.json()["total_invested"], "410.31")
+        self.assertDecimalEqual(summary.json()["total_gain"], "19.29")
+
+        transactions = self.client.get("/api/transactions?portfolio_id=default")
+        self.assertEqual(transactions.status_code, 200)
+        self.assertIn("CW8.PA", {transaction["ticker"] for transaction in transactions.json()})
+
+        duplicate_preview = self._preview_golden_csv()
+        self.assertEqual(duplicate_preview.status_code, 200)
+        self.assertEqual(duplicate_preview.json()["duplicate_count"], 8)
+
+        restored = self.client.delete("/api/hidden-securities?portfolio_id=default&ticker=CW8.PA")
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(restored.json(), {"deleted": 1})
+        restored_summary = self.client.get("/api/portfolio?portfolio_id=default")
+        self.assertIn("CW8.PA", {holding["ticker"] for holding in restored_summary.json()["holdings"]})
+
     def test_market_history_and_portfolio_history_match_golden_fixture(self):
         expected = load_json("expected_portfolio_summary.json")
         market_history = load_json("market_history_basic.json")
@@ -222,6 +284,71 @@ class ApiRouteTests(unittest.TestCase):
         portfolio_history = self.client.get("/api/portfolio/history?portfolio_id=default")
         self.assertEqual(portfolio_history.status_code, 200)
         self.assertEqual(portfolio_history.json(), expected["portfolio_history"])
+
+    def test_portfolio_history_respects_range_and_hidden_securities(self):
+        market_history = load_json("market_history_basic.json")
+        self._upload_golden_csv()
+        write_response = self.client.put("/api/market/history", json={"prices": market_history["prices"]})
+        self.assertEqual(write_response.status_code, 200)
+
+        ranged = self.client.get("/api/portfolio/history?portfolio_id=default&start_date=2026-04-01&end_date=2026-05-02")
+        self.assertEqual(ranged.status_code, 200)
+        self.assertEqual([point["date"] for point in ranged.json()], ["2026-04-20", "2026-04-22", "2026-05-02"])
+
+        self.client.put("/api/hidden-securities?portfolio_id=default", json={"ticker": "CW8.PA"})
+        hidden_history = self.client.get("/api/portfolio/history?portfolio_id=default")
+        self.assertEqual(hidden_history.status_code, 200)
+        self.assertNotEqual(hidden_history.json(), [])
+        self.assertDecimalEqual(hidden_history.json()[-1]["market_value"], "429.60")
+
+        self.client.put("/api/hidden-securities?portfolio_id=default", json={"ticker": "EWLD.PA"})
+        self.client.put("/api/hidden-securities?portfolio_id=default", json={"ticker": "VEUR.AS"})
+        all_hidden_history = self.client.get("/api/portfolio/history?portfolio_id=default")
+        self.assertEqual(all_hidden_history.status_code, 200)
+        self.assertEqual(all_hidden_history.json(), [])
+
+    def test_market_history_backfill_skips_failed_symbols(self):
+        with patch("app.main.YFinanceMarketDataProvider", return_value=StubHistoryProvider()):
+            response = self.client.post(
+                "/api/market/history/backfill",
+                json={
+                    "symbols": ["CW8.PA", "PSP5"],
+                    "start_date": "2026-06-01",
+                    "end_date": "2026-06-07",
+                    "currency": "EUR",
+                    "source": "yfinance",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["symbols"], ["CW8.PA", "PSP5"])
+        self.assertEqual(response.json()["updated"], 1)
+        self.assertEqual(response.json()["failures"][0]["symbol"], "PSP5")
+        self.assertIn("No historical market data", response.json()["failures"][0]["error"])
+
+        stored = self.client.get("/api/market/history/CW8.PA?source=yfinance")
+        self.assertEqual(stored.status_code, 200)
+        self.assertEqual([point["price_date"] for point in stored.json()], ["2026-06-01"])
+
+        created = self.client.post(
+            "/api/transactions",
+            json={
+                "transaction_date": "2026-05-31",
+                "ticker": "CW8.PA",
+                "transaction_type": "buy",
+                "quantity": "2",
+                "price": "90",
+                "fees": "0",
+                "currency": "EUR",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+
+        summary = self.client.get("/api/portfolio?portfolio_id=default")
+        self.assertEqual(summary.status_code, 200)
+        self.assertDecimalEqual(summary.json()["total_value"], "200.00")
+        self.assertDecimalEqual(summary.json()["total_gain"], "20.00")
+        self.assertDecimalEqual(summary.json()["total_gain_percent"], "11.11")
 
     def test_dca_settings_and_recommendation_routes(self):
         settings_payload = {

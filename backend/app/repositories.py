@@ -13,6 +13,7 @@ from app.domain import MarketSnapshot, Transaction, TransactionType
 from app.models import (
     AccountRecord,
     DcaSettingsRecord,
+    HiddenSecurityRecord,
     ImportSessionRecord,
     MarketPriceRecord,
     MarketPriceHistoryRecord,
@@ -280,6 +281,67 @@ def upsert_security_mappings(
     return records
 
 
+def list_hidden_securities(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> list[HiddenSecurityRecord]:
+    slug = _normalize_slug(portfolio_id)
+    portfolio = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
+    if portfolio is None:
+        return []
+    statement = (
+        select(HiddenSecurityRecord)
+        .where(HiddenSecurityRecord.portfolio_record_id == portfolio.id)
+        .order_by(HiddenSecurityRecord.ticker)
+    )
+    return list(db.scalars(statement))
+
+
+def get_hidden_security_symbols(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> set[str]:
+    return {record.ticker for record in list_hidden_securities(db, portfolio_id=portfolio_id)}
+
+
+def upsert_hidden_security(db: Session, ticker: str, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> HiddenSecurityRecord:
+    portfolio = ensure_portfolio(db, portfolio_id)
+    normalized_ticker = ticker.strip().upper()
+    if not normalized_ticker:
+        raise ValueError("Ticker is required.")
+
+    record = db.scalar(
+        select(HiddenSecurityRecord).where(
+            HiddenSecurityRecord.portfolio_record_id == portfolio.id,
+            HiddenSecurityRecord.ticker == normalized_ticker,
+        )
+    )
+    if record is None:
+        record = HiddenSecurityRecord(portfolio_record_id=portfolio.id, ticker=normalized_ticker)
+        db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def delete_hidden_security(db: Session, ticker: str, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> bool:
+    slug = _normalize_slug(portfolio_id)
+    portfolio = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
+    if portfolio is None:
+        return False
+
+    normalized_ticker = ticker.strip().upper()
+    if not normalized_ticker:
+        return False
+
+    record = db.scalar(
+        select(HiddenSecurityRecord).where(
+            HiddenSecurityRecord.portfolio_record_id == portfolio.id,
+            HiddenSecurityRecord.ticker == normalized_ticker,
+        )
+    )
+    if record is None:
+        return False
+
+    db.delete(record)
+    db.commit()
+    return True
+
+
 def bootstrap_reference_data(db: Session) -> None:
     ensure_portfolio(db)
     statement = select(
@@ -488,6 +550,7 @@ def upsert_market_price(
     currency: str = "EUR",
     source: str = "manual",
     as_of: datetime | None = None,
+    write_history: bool = True,
 ) -> MarketPriceRecord:
     normalized_symbol = symbol.upper()
     record = db.scalar(select(MarketPriceRecord).where(MarketPriceRecord.symbol == normalized_symbol))
@@ -502,17 +565,18 @@ def upsert_market_price(
     record.as_of = as_of or datetime.now(timezone.utc)
     db.commit()
     db.refresh(record)
-    upsert_market_price_history(
-        db,
-        MarketPriceHistoryPoint(
-            symbol=normalized_symbol,
-            price_date=(as_of or datetime.now(timezone.utc)).date(),
-            close=close,
-            currency=currency,
-            source=source,
-        ),
-        commit=True,
-    )
+    if write_history:
+        upsert_market_price_history(
+            db,
+            MarketPriceHistoryPoint(
+                symbol=normalized_symbol,
+                price_date=(as_of or datetime.now(timezone.utc)).date(),
+                close=close,
+                currency=currency,
+                source=source,
+            ),
+            commit=True,
+        )
     return record
 
 

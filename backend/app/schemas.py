@@ -93,6 +93,17 @@ class SecurityMappingOut(ApiModel):
     updated_at: datetime
 
 
+class HiddenSecurityIn(BaseModel):
+    ticker: str
+
+
+class HiddenSecurityOut(ApiModel):
+    id: int
+    portfolio_id: str
+    ticker: str
+    created_at: datetime
+
+
 class PortfolioHistoryRequest(BaseModel):
     portfolio_id: str = "default"
     start_date: date | None = None
@@ -238,6 +249,7 @@ class MarketHistoryBackfillOut(ApiModel):
     symbols: list[str]
     source: str
     updated: int
+    failures: list[dict[str, str]] = []
 
 
 class PricedHoldingOut(ApiModel):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from datetime import date
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -20,13 +20,16 @@ from app.repositories import (
     bootstrap_reference_data,
     count_transactions,
     create_portfolio,
+    delete_hidden_security,
     delete_security_mapping,
     ensure_account,
     existing_transaction_fingerprints,
     get_dca_settings as load_dca_settings,
+    get_hidden_security_symbols,
     get_market_prices,
     get_security_mapping_symbols,
     import_transactions,
+    list_hidden_securities as load_hidden_securities,
     list_market_price_history,
     list_accounts as load_accounts,
     list_portfolios as load_portfolios,
@@ -36,6 +39,7 @@ from app.repositories import (
     SecurityMapping,
     transaction_fingerprint,
     upsert_dca_settings,
+    upsert_hidden_security,
     upsert_market_price,
     upsert_market_price_history_many,
     upsert_security_mappings,
@@ -49,6 +53,8 @@ from app.schemas import (
     DcaSettingsIn,
     DcaSettingsOut,
     HealthOut,
+    HiddenSecurityIn,
+    HiddenSecurityOut,
     ImportPreviewOut,
     ImportSummaryOut,
     MarketHistoryBackfillOut,
@@ -322,6 +328,36 @@ def remove_security_mapping(
     return {"deleted": int(delete_security_mapping(db, security_label=security_label, portfolio_id=portfolio_id))}
 
 
+@app.get("/api/hidden-securities", response_model=list[HiddenSecurityOut])
+def list_hidden_tracking_securities(
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    return [_hidden_security_payload(record, portfolio_id) for record in load_hidden_securities(db, portfolio_id=portfolio_id)]
+
+
+@app.put("/api/hidden-securities", response_model=HiddenSecurityOut)
+def hide_tracking_security(
+    payload: HiddenSecurityIn,
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    try:
+        record = upsert_hidden_security(db, ticker=payload.ticker, portfolio_id=portfolio_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _hidden_security_payload(record, portfolio_id)
+
+
+@app.delete("/api/hidden-securities", response_model=DeletedCountOut)
+def restore_tracking_security(
+    ticker: str,
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    return {"deleted": int(delete_hidden_security(db, ticker=ticker, portfolio_id=portfolio_id))}
+
+
 @app.get("/api/securities/search", response_model=list[SymbolSearchCandidateOut])
 def search_securities(
     query: str,
@@ -416,6 +452,8 @@ def backfill_market_price_history(
     symbols = _backfill_symbols(payload)
     provider = YFinanceMarketDataProvider()
     points: list[MarketPriceHistoryPoint] = []
+    latest_points: dict[str, MarketPriceHistoryPoint] = {}
+    failures: list[dict[str, str]] = []
 
     for symbol in symbols:
         try:
@@ -427,9 +465,10 @@ def backfill_market_price_history(
                 source=payload.source,
             )
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Market data backfill failed for {symbol}: {exc}") from exc
-        points.extend(
-            MarketPriceHistoryPoint(
+            failures.append({"symbol": symbol, "error": str(exc)})
+            continue
+        for point in fetched:
+            history_point = MarketPriceHistoryPoint(
                 symbol=point.symbol,
                 price_date=point.price_date,
                 open=point.open,
@@ -441,13 +480,28 @@ def backfill_market_price_history(
                 currency=point.currency,
                 source=point.source,
             )
-            for point in fetched
+            points.append(history_point)
+            current_latest = latest_points.get(history_point.symbol)
+            if current_latest is None or history_point.price_date > current_latest.price_date:
+                latest_points[history_point.symbol] = history_point
+
+    updated = upsert_market_price_history_many(db, points)
+    for point in latest_points.values():
+        upsert_market_price(
+            db,
+            symbol=point.symbol,
+            close=point.adjusted_close or point.close,
+            currency=point.currency,
+            source=point.source,
+            as_of=datetime.combine(point.price_date, time.min, tzinfo=timezone.utc),
+            write_history=False,
         )
 
     return {
         "symbols": symbols,
         "source": payload.source,
-        "updated": upsert_market_price_history_many(db, points),
+        "updated": updated,
+        "failures": failures,
     }
 
 
@@ -456,7 +510,8 @@ def get_portfolio(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
 ) -> object:
-    return summarize_portfolio(load_transactions(db, portfolio_id=portfolio_id), get_market_prices(db))
+    transactions = _visible_transactions(db, portfolio_id)
+    return summarize_portfolio(transactions, get_market_prices(db))
 
 
 @app.get("/api/portfolio/history", response_model=list[PortfolioHistoryPointOut])
@@ -466,7 +521,9 @@ def get_portfolio_history(
     end_date: date | None = None,
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
-    transactions = load_transactions(db, portfolio_id=portfolio_id)
+    transactions = _visible_transactions(db, portfolio_id)
+    if not transactions:
+        return []
     symbols = sorted({transaction.ticker for transaction in transactions})
     price_history = {
         symbol: _history_map(list_market_price_history(db, symbol=symbol, start_date=start_date, end_date=end_date))
@@ -695,6 +752,15 @@ def _security_mapping_payload(record: object, portfolio_id: str) -> dict[str, ob
     }
 
 
+def _hidden_security_payload(record: object, portfolio_id: str) -> dict[str, object]:
+    return {
+        "id": record.id,
+        "portfolio_id": portfolio_id,
+        "ticker": record.ticker,
+        "created_at": record.created_at,
+    }
+
+
 def _market_price_history_payload(record: object) -> dict[str, object]:
     return {
         "symbol": record.symbol,
@@ -732,6 +798,14 @@ def _portfolio_history_payload(point: object) -> dict[str, object]:
         "gain_percent": point.gain_percent,
         "benchmarks": point.benchmarks,
     }
+
+
+def _visible_transactions(db: Session, portfolio_id: str) -> list[Transaction]:
+    hidden_symbols = get_hidden_security_symbols(db, portfolio_id=portfolio_id)
+    transactions = load_transactions(db, portfolio_id=portfolio_id)
+    if not hidden_symbols:
+        return transactions
+    return [transaction for transaction in transactions if transaction.ticker.upper() not in hidden_symbols]
 
 
 def _history_map(records: list[object]) -> dict[date, Decimal]:

@@ -99,6 +99,16 @@ class SecurityMappingRecord(Base):
     )
 
 
+class HiddenSecurityRecord(Base):
+    __tablename__ = "hidden_securities"
+    __table_args__ = (UniqueConstraint("portfolio_record_id", "ticker", name="uq_hidden_securities_portfolio_ticker"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_record_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), index=True)
+    ticker: Mapped[str] = mapped_column(String(32), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class MarketPriceRecord(Base):
     __tablename__ = "market_prices"
     __table_args__ = (UniqueConstraint("symbol", name="uq_market_prices_symbol"),)

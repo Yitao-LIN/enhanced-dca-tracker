@@ -137,6 +137,37 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(default_after_delete, {})
         self.assertEqual(long_term_after_delete, {"amundi msci world": "WRD.PA"})
 
+    def test_hidden_securities_are_persisted_per_portfolio(self):
+        from app.repositories import (
+            create_portfolio,
+            delete_hidden_security,
+            get_hidden_security_symbols,
+            list_hidden_securities,
+            upsert_hidden_security,
+        )
+
+        with self.Session() as db:
+            create_portfolio(db, name="Long Term", slug="long-term")
+            default_record = upsert_hidden_security(db, "cw8.pa")
+            duplicate_record = upsert_hidden_security(db, "CW8.PA")
+            long_term_record = upsert_hidden_security(db, "wrd.pa", portfolio_id="long-term")
+            default_hidden = get_hidden_security_symbols(db)
+            long_term_hidden = get_hidden_security_symbols(db, portfolio_id="long-term")
+            listed = list_hidden_securities(db)
+            deleted = delete_hidden_security(db, "cw8.pa")
+            default_after_delete = get_hidden_security_symbols(db)
+            long_term_after_delete = get_hidden_security_symbols(db, portfolio_id="long-term")
+
+        self.assertEqual(default_record.id, duplicate_record.id)
+        self.assertEqual(default_record.ticker, "CW8.PA")
+        self.assertEqual(long_term_record.ticker, "WRD.PA")
+        self.assertEqual(default_hidden, {"CW8.PA"})
+        self.assertEqual(long_term_hidden, {"WRD.PA"})
+        self.assertEqual([record.ticker for record in listed], ["CW8.PA"])
+        self.assertTrue(deleted)
+        self.assertEqual(default_after_delete, set())
+        self.assertEqual(long_term_after_delete, {"WRD.PA"})
+
     def test_import_skips_duplicate_transactions(self):
         from app.domain import Transaction, TransactionType
         from app.repositories import import_transactions, list_transactions

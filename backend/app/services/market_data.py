@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import logging
 
 from app.domain import MarketSnapshot
 
@@ -111,14 +112,20 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         except ImportError as exc:
             raise RuntimeError("Install yfinance to use live market data.") from exc
 
-        history = yf.download(
-            symbol,
-            start=start_date.isoformat(),
-            end=(end_date + timedelta(days=1)).isoformat(),
-            progress=False,
-            auto_adjust=False,
-            threads=False,
-        )
+        yfinance_logger = logging.getLogger("yfinance")
+        previous_level = yfinance_logger.level
+        yfinance_logger.setLevel(logging.CRITICAL)
+        try:
+            history = yf.download(
+                symbol,
+                start=start_date.isoformat(),
+                end=(end_date + timedelta(days=1)).isoformat(),
+                progress=False,
+                auto_adjust=False,
+                threads=False,
+            )
+        finally:
+            yfinance_logger.setLevel(previous_level)
         if history.empty:
             raise ValueError(f"No historical market data returned for {symbol}")
 
