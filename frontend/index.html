@@ -578,8 +578,8 @@
       const API_BASE_URL = localStorage.getItem("trackerApiBaseUrl") || "http://127.0.0.1:8000";
       const BENCHMARK_SYMBOLS = ["^GSPC", "^NDX"];
       const CHART_RANGES = [
-        { key: "1d", label: "1D", days: 1 },
-        { key: "5d", label: "5D", days: 5 },
+        { key: "1d", label: "1D", days: 1, intraday: true, interval: "30m" },
+        { key: "5d", label: "5D", days: 5, intraday: true, interval: "1h" },
         { key: "30d", label: "30D", days: 30 },
         { key: "1y", label: "1Y", yearStart: true },
         { key: "all", label: "Since start", days: null },
@@ -633,9 +633,17 @@
         return date.toISOString().slice(0, 10);
       }
 
+      function chartRangeConfig(rangeKey) {
+        return CHART_RANGES.find((item) => item.key === rangeKey) || CHART_RANGES[3];
+      }
+
+      function isIntradayRange(rangeKey) {
+        return Boolean(chartRangeConfig(rangeKey).intraday);
+      }
+
       function chartDateRange(rangeKey) {
         const end = new Date();
-        const range = CHART_RANGES.find((item) => item.key === rangeKey) || CHART_RANGES[3];
+        const range = chartRangeConfig(rangeKey);
         const params = { end_date: isoDate(end) };
         if (range.yearStart) {
           params.start_date = isoDate(new Date(end.getFullYear(), 0, 1));
@@ -645,6 +653,18 @@
           params.start_date = isoDate(start);
         }
         return params;
+      }
+
+      function chartDateTimeRange(rangeKey) {
+        const end = new Date();
+        const range = chartRangeConfig(rangeKey);
+        const start = new Date(end);
+        start.setDate(start.getDate() - (range.days || 1));
+        return {
+          start_at: start.toISOString(),
+          end_at: end.toISOString(),
+          interval: range.interval || "30m",
+        };
       }
 
       function queryString(params) {
@@ -812,17 +832,36 @@
 
       function chartDate(value) {
         if (!value) return null;
-        const date = new Date(`${value}T00:00:00`);
+        const text = String(value);
+        const date = new Date(text.includes("T") ? text : `${text}T00:00:00`);
         return Number.isNaN(date.getTime()) ? null : date;
       }
 
       function chartDateLabel(value, rangeDays) {
         const date = chartDate(value);
         if (!date) return value;
+        if (String(value).includes("T")) {
+          const options = rangeDays <= 2
+            ? { hour: "2-digit", minute: "2-digit" }
+            : { day: "2-digit", month: "short", hour: "2-digit" };
+          return new Intl.DateTimeFormat("en-GB", options).format(date);
+        }
         const options = rangeDays <= 90
           ? { day: "2-digit", month: "short" }
           : { month: "short", year: "2-digit" };
         return new Intl.DateTimeFormat("en-GB", options).format(date);
+      }
+
+      function chartHoverDateLabel(value, rangeDays) {
+        const date = chartDate(value);
+        if (!date) return value;
+        if (String(value).includes("T")) {
+          const options = rangeDays <= 2
+            ? { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }
+            : { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" };
+          return new Intl.DateTimeFormat("en-GB", options).format(date);
+        }
+        return chartDateLabel(value, rangeDays);
       }
 
       function chartRangeDays(data) {
@@ -963,7 +1002,7 @@
                     {hoverPoint.label}
                   </text>
                   <text x={Math.min(width - 178, hoverPoint.x + 22)} y={Math.max(45, hoverPoint.y - 6)} fontSize="11" fill="#627083">
-                    {hoverPoint.date ? `${hoverPoint.date} - ${money(hoverPoint.value)}` : money(hoverPoint.value)}
+                    {hoverPoint.date ? `${chartHoverDateLabel(hoverPoint.date, rangeDays)} - ${money(hoverPoint.value)}` : money(hoverPoint.value)}
                   </text>
                 </g>
               )}
@@ -1045,7 +1084,7 @@
         const history = useMemo(() => {
           if (apiAvailable && portfolioHistory.length) {
             return portfolioHistory.map((point) => ({
-              date: String(point.date),
+              date: String(point.timestamp || point.date),
               invested: toNumber(point.invested_amount),
               value: toNumber(point.market_value),
               sp500: point.benchmarks && point.benchmarks["^GSPC"] !== undefined ? toNumber(point.benchmarks["^GSPC"]) : undefined,
@@ -1076,7 +1115,7 @@
 
         useEffect(() => {
           if (apiAvailable) {
-            refreshBackendData(selectedPortfolioId, { autoBackfill: false, quiet: true });
+            refreshBackendData(selectedPortfolioId, { autoBackfill: true, quiet: true });
           }
         }, [chartRange]);
 
@@ -1479,6 +1518,16 @@
           });
         }
 
+        function historyPath(portfolioId = selectedPortfolioId) {
+          if (isIntradayRange(chartRange)) {
+            return `/api/portfolio/history/intraday?${queryString({
+              portfolio_id: portfolioId,
+              ...chartDateTimeRange(chartRange),
+            })}`;
+          }
+          return `/api/portfolio/history?${historyQuery(portfolioId)}`;
+        }
+
         async function refreshBackendData(portfolioId = selectedPortfolioId, options = {}) {
           const { autoBackfill = false, quiet = false } = options;
           setApiLoading(true);
@@ -1487,7 +1536,7 @@
               apiRequest("/api/portfolios"),
               apiRequest(`/api/accounts?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
-              apiRequest(`/api/portfolio/history?${historyQuery(portfolioId)}`),
+              apiRequest(historyPath(portfolioId)),
               apiRequest(`/api/dca/settings?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(portfolioId)}`),
@@ -1514,14 +1563,19 @@
               if (result) {
                 const refreshed = await Promise.all([
                   apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
-                  apiRequest(`/api/portfolio/history?${historyQuery(portfolioId)}`),
+                  apiRequest(historyPath(portfolioId)),
                   apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(portfolioId)}`),
                 ]);
                 setApiSummary(refreshed[0]);
                 setPortfolioHistory(refreshed[1]);
                 setHiddenSecurities(refreshed[2]);
-                if (!quiet) {
-                  const skipped = result.failures || [];
+                const skipped = result.failures || [];
+                const noIntradayRows = isIntradayRange(chartRange) && result.updated === 0 && skipped.length > 0;
+                if (!quiet || noIntradayRows) {
+                  if (noIntradayRows) {
+                    setStatus(`Intraday market data was unavailable for ${skipped.map((failure) => failure.symbol).join(", ")}. Showing stored daily history for this range.`);
+                    return;
+                  }
                   const skippedText = skipped.length ? ` Skipped ${skipped.map((failure) => failure.symbol).join(", ")}.` : "";
                   setStatus(`Backfilled ${result.updated} market history row(s).${skippedText}`);
                 }
@@ -1637,16 +1691,31 @@
             ...BENCHMARK_SYMBOLS,
           ].filter(Boolean).map((symbol) => String(symbol).toUpperCase()))).sort();
           if (!symbols.length) return null;
-          const range = chartDateRange(chartRange);
-          if (!range.start_date) {
-            range.start_date = historyRows[0]?.date;
-            if (!range.start_date) {
-              const start = new Date();
-              start.setFullYear(start.getFullYear() - 5);
-              range.start_date = isoDate(start);
-            }
-          }
           try {
+            if (isIntradayRange(chartRange)) {
+              const range = chartDateTimeRange(chartRange);
+              return await apiRequest("/api/market/intraday/backfill", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  symbols,
+                  start_at: range.start_at,
+                  end_at: range.end_at,
+                  interval: range.interval,
+                  currency: "USD",
+                  source: "yfinance",
+                }),
+              });
+            }
+            const range = chartDateRange(chartRange);
+            if (!range.start_date) {
+              range.start_date = historyRows[0]?.date;
+              if (!range.start_date) {
+                const start = new Date();
+                start.setFullYear(start.getFullYear() - 5);
+                range.start_date = isoDate(start);
+              }
+            }
             const payload = {
               symbols,
               start_date: range.start_date,
