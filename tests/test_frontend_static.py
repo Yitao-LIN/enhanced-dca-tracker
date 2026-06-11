@@ -1,0 +1,28 @@
+import unittest
+from pathlib import Path
+
+
+FRONTEND_PATH = Path(__file__).parents[1] / "frontend" / "index.html"
+
+
+class FrontendStaticTests(unittest.TestCase):
+    def test_backend_empty_history_does_not_render_demo_monthly_chart(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("if (apiAvailable) {\n            return [];\n          }", source)
+        self.assertLess(
+            source.index("if (apiAvailable) {\n            return [];\n          }"),
+            source.index('const months = ["Jan", "Feb", "Mar", "Apr", "May", "Now"];'),
+        )
+
+    def test_market_price_parser_keeps_dot_decimal_prices(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+
+        parse_number_body = source[source.index("function parseNumber(value)") : source.index("function toNumber(value)")]
+        self.assertIn("const lastComma = normalized.lastIndexOf(\",\");", parse_number_body)
+        self.assertIn("const lastDot = normalized.lastIndexOf(\".\");", parse_number_body)
+        self.assertNotIn('replace(/\\./g, "")', parse_number_body)
+
+
+if __name__ == "__main__":
+    unittest.main()

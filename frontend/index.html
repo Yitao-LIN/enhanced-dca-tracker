@@ -620,7 +620,16 @@
 
       function parseNumber(value) {
         if (!value) return 0;
-        const normalized = String(value).replace(/\s/g, "").replace(/\./g, "").replace(",", ".");
+        let normalized = String(value).trim().replace(/\s/g, "").replace(/[^0-9,.-]/g, "");
+        const lastComma = normalized.lastIndexOf(",");
+        const lastDot = normalized.lastIndexOf(".");
+        if (lastComma >= 0 && lastDot >= 0) {
+          const decimalSeparator = lastComma > lastDot ? "," : ".";
+          const groupSeparator = decimalSeparator === "," ? "." : ",";
+          normalized = normalized.replaceAll(groupSeparator, "").replace(decimalSeparator, ".");
+        } else if (lastComma >= 0) {
+          normalized = normalized.replace(",", ".");
+        }
         return Number(normalized.replace(/[^0-9.-]/g, "")) || 0;
       }
 
@@ -894,8 +903,12 @@
           ...(visibleBenchmarks.nasdaq100 ? [{ key: "nasdaq100", label: "Nasdaq 100", color: "#b45f06", width: 2.5, dash: "4 5" }] : []),
         ];
         const values = data.flatMap((item) => series.map((serie) => item[serie.key]).filter((value) => Number.isFinite(value)));
-        const max = Math.max(...values, 1);
-        const min = Math.min(...values, 0);
+        const rawMax = Math.max(...values);
+        const rawMin = Math.min(...values);
+        const rawRange = rawMax - rawMin;
+        const padding = rawRange > 0 ? rawRange * 0.08 : Math.max(Math.abs(rawMax) * 0.01, 1);
+        const max = rawMax + padding;
+        const min = rawMin - padding;
         const rangeDays = chartRangeDays(data);
         const tickIndexes = chartTickIndexes(data);
         const x = (index) => pad + (index / Math.max(data.length - 1, 1)) * (width - pad * 2);
@@ -1090,6 +1103,9 @@
               sp500: point.benchmarks && point.benchmarks["^GSPC"] !== undefined ? toNumber(point.benchmarks["^GSPC"]) : undefined,
               nasdaq100: point.benchmarks && point.benchmarks["^NDX"] !== undefined ? toNumber(point.benchmarks["^NDX"]) : undefined,
             }));
+          }
+          if (apiAvailable) {
+            return [];
           }
           const months = ["Jan", "Feb", "Mar", "Apr", "May", "Now"];
           return months.map((month, index) => {
