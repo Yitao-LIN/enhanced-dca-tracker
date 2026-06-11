@@ -1,6 +1,6 @@
 import importlib.util
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 SQLALCHEMY_AVAILABLE = importlib.util.find_spec("sqlalchemy") is not None
@@ -283,6 +283,66 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(benchmark_history), 1)
         self.assertEqual(benchmark_history[0].close, Decimal("4050.00000000"))
         self.assertEqual([record.price_date for record in full_history], [date(2026, 1, 15), date(2026, 1, 16)])
+
+    def test_intraday_market_prices_upsert_and_filter_ranges(self):
+        from app.repositories import (
+            IntradayMarketPricePoint,
+            list_intraday_market_prices,
+            upsert_intraday_market_prices_many,
+        )
+
+        first_tick = datetime(2026, 6, 9, 9, 0)
+        second_tick = datetime(2026, 6, 9, 9, 30)
+        with self.Session() as db:
+            updated = upsert_intraday_market_prices_many(
+                db,
+                [
+                    IntradayMarketPricePoint(
+                        symbol="psp5.pa",
+                        price_at=first_tick,
+                        interval="30M",
+                        close=Decimal("55.5"),
+                        currency="eur",
+                        source="yfinance",
+                    ),
+                    IntradayMarketPricePoint(
+                        symbol="PSP5.PA",
+                        price_at=second_tick,
+                        interval="30m",
+                        close=Decimal("56"),
+                        currency="EUR",
+                        source="yfinance",
+                    ),
+                ],
+            )
+            upsert_intraday_market_prices_many(
+                db,
+                [
+                    IntradayMarketPricePoint(
+                        symbol="PSP5.PA",
+                        price_at=second_tick,
+                        interval="30m",
+                        close=Decimal("57"),
+                        currency="EUR",
+                        source="yfinance",
+                    )
+                ],
+            )
+
+            ranged = list_intraday_market_prices(
+                db,
+                symbol="PSP5.PA",
+                start_at=second_tick,
+                end_at=second_tick,
+                interval="30m",
+                source="yfinance",
+            )
+            full_history = list_intraday_market_prices(db, symbol="PSP5.PA")
+
+        self.assertEqual(updated, 2)
+        self.assertEqual(len(ranged), 1)
+        self.assertEqual(ranged[0].close, Decimal("57.00000000"))
+        self.assertEqual([record.price_at for record in full_history], [first_tick, second_tick])
 
     def test_dca_settings_are_persisted_per_portfolio(self):
         from app.repositories import DcaSettings, get_dca_settings, upsert_dca_settings

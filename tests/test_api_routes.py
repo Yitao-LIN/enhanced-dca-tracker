@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 import zipfile
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app, get_symbol_search_provider
-from app.services.market_data import HistoricalMarketPrice, SymbolSearchResult
+from app.services.market_data import HistoricalMarketPrice, IntradayMarketPrice, SymbolSearchResult
 import app.models as models  # noqa: F401
 
 
@@ -82,6 +82,36 @@ class StubHistoryProvider:
                 currency=currency,
                 source=source,
             )
+        ]
+
+    def intraday_prices(
+        self,
+        symbol: str,
+        start_at,
+        end_at,
+        interval: str = "30m",
+        currency: str = "USD",
+        source: str = "yfinance",
+    ):
+        if symbol == "PSP5":
+            raise ValueError("No intraday market data returned for PSP5")
+        return [
+            IntradayMarketPrice(
+                symbol=symbol,
+                price_at=datetime(2026, 6, 9, 9, 0),
+                interval=interval,
+                close=Decimal("100"),
+                currency=currency,
+                source=source,
+            ),
+            IntradayMarketPrice(
+                symbol=symbol,
+                price_at=datetime(2026, 6, 9, 9, 30),
+                interval=interval,
+                close=Decimal("105"),
+                currency=currency,
+                source=source,
+            ),
         ]
 
 
@@ -349,6 +379,102 @@ class ApiRouteTests(unittest.TestCase):
         self.assertDecimalEqual(summary.json()["total_value"], "200.00")
         self.assertDecimalEqual(summary.json()["total_gain"], "20.00")
         self.assertDecimalEqual(summary.json()["total_gain_percent"], "11.11")
+
+    def test_intraday_backfill_feeds_portfolio_history(self):
+        with patch("app.main.YFinanceMarketDataProvider", return_value=StubHistoryProvider()):
+            response = self.client.post(
+                "/api/market/intraday/backfill",
+                json={
+                    "symbols": ["CW8.PA"],
+                    "start_at": "2026-06-09T09:00:00",
+                    "end_at": "2026-06-09T10:00:00",
+                    "interval": "30m",
+                    "currency": "EUR",
+                    "source": "yfinance",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["symbols"], ["CW8.PA"])
+        self.assertEqual(response.json()["interval"], "30m")
+        self.assertEqual(response.json()["updated"], 2)
+        self.assertEqual(response.json()["failures"], [])
+
+        created = self.client.post(
+            "/api/transactions",
+            json={
+                "transaction_date": "2026-06-09",
+                "ticker": "CW8.PA",
+                "transaction_type": "buy",
+                "quantity": "2",
+                "price": "90",
+                "fees": "0",
+                "currency": "EUR",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+
+        history = self.client.get(
+            "/api/portfolio/history/intraday"
+            "?portfolio_id=default&start_at=2026-06-09T09:00:00&end_at=2026-06-09T10:00:00&interval=30m"
+        )
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(
+            [point["timestamp"] for point in history.json()],
+            ["2026-06-09T09:00:00", "2026-06-09T09:30:00"],
+        )
+        self.assertDecimalEqual(history.json()[0]["market_value"], "200.00")
+        self.assertDecimalEqual(history.json()[1]["market_value"], "210.00")
+
+    def test_intraday_history_uses_daily_fallback_when_intraday_rows_are_missing(self):
+        created = self.client.post(
+            "/api/transactions",
+            json={
+                "transaction_date": "2026-06-09",
+                "ticker": "CW8.PA",
+                "transaction_type": "buy",
+                "quantity": "2",
+                "price": "90",
+                "fees": "0",
+                "currency": "EUR",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+        write_response = self.client.put(
+            "/api/market/history",
+            json={
+                "prices": [
+                    {
+                        "symbol": "CW8.PA",
+                        "price_date": "2026-06-09",
+                        "close": "105",
+                        "currency": "EUR",
+                        "source": "manual",
+                    },
+                    {
+                        "symbol": "^GSPC",
+                        "price_date": "2026-06-09",
+                        "close": "6000",
+                        "currency": "USD",
+                        "source": "manual",
+                    },
+                ]
+            },
+        )
+        self.assertEqual(write_response.status_code, 200)
+
+        history = self.client.get(
+            "/api/portfolio/history/intraday"
+            "?portfolio_id=default&start_at=2026-06-09T09:00:00&end_at=2026-06-09T10:00:00&interval=30m"
+        )
+
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(
+            [point["timestamp"] for point in history.json()],
+            ["2026-06-09T09:00:00", "2026-06-09T09:30:00", "2026-06-09T10:00:00"],
+        )
+        self.assertEqual({point["market_value"] for point in history.json()}, {"210.00"})
+        self.assertEqual({point["benchmarks"]["^GSPC"] for point in history.json()}, {"210.00"})
 
     def test_dca_settings_and_recommendation_routes(self):
         settings_payload = {

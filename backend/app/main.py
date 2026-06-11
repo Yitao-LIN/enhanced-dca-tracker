@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
@@ -29,6 +29,8 @@ from app.repositories import (
     get_market_prices,
     get_security_mapping_symbols,
     import_transactions,
+    IntradayMarketPricePoint,
+    list_intraday_market_prices,
     list_hidden_securities as load_hidden_securities,
     list_market_price_history,
     list_accounts as load_accounts,
@@ -40,6 +42,7 @@ from app.repositories import (
     transaction_fingerprint,
     upsert_dca_settings,
     upsert_hidden_security,
+    upsert_intraday_market_prices_many,
     upsert_market_price,
     upsert_market_price_history_many,
     upsert_security_mappings,
@@ -57,12 +60,15 @@ from app.schemas import (
     HiddenSecurityOut,
     ImportPreviewOut,
     ImportSummaryOut,
+    IntradayMarketBackfillOut,
+    IntradayMarketBackfillRequest,
     MarketHistoryBackfillOut,
     MarketHistoryBackfillRequest,
     MarketPriceHistoryIn,
     MarketPriceHistoryPointOut,
     MarketQuoteOut,
     PortfolioHistoryPointOut,
+    PortfolioIntradayHistoryPointOut,
     PortfolioIn,
     PortfolioOut,
     PortfolioSummaryOut,
@@ -80,6 +86,7 @@ from app.services.dca import calculate_enhanced_dca
 from app.services.market_data import DEFAULT_BENCHMARKS, YFinanceMarketDataProvider
 from app.services.portfolio import summarize_portfolio
 from app.services.portfolio_history import build_portfolio_history
+from app.services.portfolio_intraday import build_portfolio_intraday_history
 
 
 app = FastAPI(title="Enhanced DCA Investment Tracker")
@@ -505,6 +512,75 @@ def backfill_market_price_history(
     }
 
 
+@app.post("/api/market/intraday/backfill", response_model=IntradayMarketBackfillOut)
+def backfill_intraday_market_prices(
+    payload: IntradayMarketBackfillRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    start_at = _naive_utc(payload.start_at)
+    end_at = _naive_utc(payload.end_at)
+    if start_at > end_at:
+        raise HTTPException(status_code=400, detail="start_at must be before or equal to end_at.")
+    symbols = _backfill_symbols(payload)
+    interval = payload.interval.lower()
+    provider = YFinanceMarketDataProvider()
+    points: list[IntradayMarketPricePoint] = []
+    latest_points: dict[str, IntradayMarketPricePoint] = {}
+    failures: list[dict[str, str]] = []
+
+    for symbol in symbols:
+        try:
+            fetched = provider.intraday_prices(
+                symbol=symbol,
+                start_at=start_at,
+                end_at=end_at,
+                interval=interval,
+                currency=payload.currency,
+                source=payload.source,
+            )
+        except Exception as exc:
+            failures.append({"symbol": symbol, "error": str(exc)})
+            continue
+        for point in fetched:
+            intraday_point = IntradayMarketPricePoint(
+                symbol=point.symbol,
+                price_at=point.price_at,
+                interval=point.interval,
+                open=point.open,
+                high=point.high,
+                low=point.low,
+                close=point.close,
+                adjusted_close=point.adjusted_close,
+                volume=point.volume,
+                currency=point.currency,
+                source=point.source,
+            )
+            points.append(intraday_point)
+            current_latest = latest_points.get(intraday_point.symbol)
+            if current_latest is None or intraday_point.price_at > current_latest.price_at:
+                latest_points[intraday_point.symbol] = intraday_point
+
+    updated = upsert_intraday_market_prices_many(db, points)
+    for point in latest_points.values():
+        upsert_market_price(
+            db,
+            symbol=point.symbol,
+            close=point.adjusted_close or point.close,
+            currency=point.currency,
+            source=point.source,
+            as_of=point.price_at,
+            write_history=False,
+        )
+
+    return {
+        "symbols": symbols,
+        "source": payload.source,
+        "interval": interval,
+        "updated": updated,
+        "failures": failures,
+    }
+
+
 @app.get("/api/portfolio", response_model=PortfolioSummaryOut)
 def get_portfolio(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
@@ -541,6 +617,53 @@ def get_portfolio_history(
             benchmarks_by_symbol=benchmark_history,
             start_date=start_date,
             end_date=end_date,
+        )
+    ]
+
+
+@app.get("/api/portfolio/history/intraday", response_model=list[PortfolioIntradayHistoryPointOut])
+def get_portfolio_intraday_history(
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    interval: str = "30m",
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    start_at = _naive_utc(start_at) if start_at is not None else None
+    end_at = _naive_utc(end_at) if end_at is not None else None
+    transactions = _visible_transactions(db, portfolio_id)
+    if not transactions:
+        return []
+    normalized_interval = interval.lower()
+    symbols = sorted({transaction.ticker for transaction in transactions})
+    price_history = {
+        symbol: _intraday_history_map(
+            list_intraday_market_prices(db, symbol=symbol, start_at=start_at, end_at=end_at, interval=normalized_interval)
+        )
+        for symbol in symbols
+    }
+    benchmark_history = {
+        symbol: _intraday_history_map(
+            list_intraday_market_prices(db, symbol=symbol, start_at=start_at, end_at=end_at, interval=normalized_interval)
+        )
+        for symbol in DEFAULT_BENCHMARKS
+    }
+    fallback_timestamps = _intraday_fallback_timestamps(start_at, end_at, normalized_interval)
+    if fallback_timestamps:
+        for symbol, history in price_history.items():
+            if not history:
+                history.update(_daily_history_fallback_map(db, symbol, fallback_timestamps))
+        for symbol, history in benchmark_history.items():
+            if not history:
+                history.update(_daily_history_fallback_map(db, symbol, fallback_timestamps))
+    return [
+        _portfolio_intraday_history_payload(point)
+        for point in build_portfolio_intraday_history(
+            transactions,
+            prices_by_symbol=price_history,
+            benchmarks_by_symbol=benchmark_history,
+            start_at=start_at,
+            end_at=end_at,
         )
     ]
 
@@ -800,6 +923,17 @@ def _portfolio_history_payload(point: object) -> dict[str, object]:
     }
 
 
+def _portfolio_intraday_history_payload(point: object) -> dict[str, object]:
+    return {
+        "timestamp": point.timestamp,
+        "invested_amount": point.invested_amount,
+        "market_value": point.market_value,
+        "gain": point.gain,
+        "gain_percent": point.gain_percent,
+        "benchmarks": point.benchmarks,
+    }
+
+
 def _visible_transactions(db: Session, portfolio_id: str) -> list[Transaction]:
     hidden_symbols = get_hidden_security_symbols(db, portfolio_id=portfolio_id)
     transactions = load_transactions(db, portfolio_id=portfolio_id)
@@ -810,6 +944,69 @@ def _visible_transactions(db: Session, portfolio_id: str) -> list[Transaction]:
 
 def _history_map(records: list[object]) -> dict[date, Decimal]:
     return {record.price_date: record.adjusted_close or record.close for record in records}
+
+
+def _intraday_history_map(records: list[object]) -> dict[datetime, Decimal]:
+    return {record.price_at: record.adjusted_close or record.close for record in records}
+
+
+def _intraday_fallback_timestamps(start_at: datetime | None, end_at: datetime | None, interval: str) -> list[datetime]:
+    if start_at is None or end_at is None or start_at > end_at:
+        return []
+    delta = _intraday_interval_delta(interval)
+    timestamp = _ceil_to_interval(start_at, delta)
+    timestamps: list[datetime] = []
+    while timestamp <= end_at and len(timestamps) < 2000:
+        timestamps.append(timestamp)
+        timestamp += delta
+    return timestamps
+
+
+def _daily_history_fallback_map(db: Session, symbol: str, timestamps: list[datetime]) -> dict[datetime, Decimal]:
+    if not timestamps:
+        return {}
+    records = list_market_price_history(
+        db,
+        symbol=symbol,
+        start_date=timestamps[0].date(),
+        end_date=timestamps[-1].date(),
+    )
+    if not records:
+        return {}
+    fallback: dict[datetime, Decimal] = {}
+    last_price: Decimal | None = None
+    record_index = 0
+    for timestamp in timestamps:
+        while record_index < len(records) and records[record_index].price_date <= timestamp.date():
+            last_price = records[record_index].adjusted_close or records[record_index].close
+            record_index += 1
+        if last_price is not None:
+            fallback[timestamp] = last_price
+    return fallback
+
+
+def _intraday_interval_delta(interval: str) -> timedelta:
+    match = re.fullmatch(r"(\d+)([mh])", interval.lower())
+    if not match:
+        raise HTTPException(status_code=400, detail="interval must use minutes or hours, for example 30m or 1h.")
+    amount = int(match.group(1))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="interval must be positive.")
+    return timedelta(minutes=amount) if match.group(2) == "m" else timedelta(hours=amount)
+
+
+def _ceil_to_interval(value: datetime, delta: timedelta) -> datetime:
+    day_start = datetime.combine(value.date(), time.min, tzinfo=value.tzinfo)
+    interval_seconds = int(delta.total_seconds())
+    elapsed_seconds = int((value - day_start).total_seconds())
+    rounded_seconds = ((elapsed_seconds + interval_seconds - 1) // interval_seconds) * interval_seconds
+    return day_start + timedelta(seconds=rounded_seconds)
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _market_change_percent(records: list[object]) -> Decimal:

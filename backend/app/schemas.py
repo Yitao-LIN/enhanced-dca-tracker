@@ -68,6 +68,16 @@ class MarketHistoryBackfillRequest(BaseModel):
     source: str = "yfinance"
 
 
+class IntradayMarketBackfillRequest(BaseModel):
+    symbol: str | None = None
+    symbols: list[str] | None = None
+    start_at: datetime
+    end_at: datetime
+    interval: str = "30m"
+    currency: str = "USD"
+    source: str = "yfinance"
+
+
 class SecurityMappingIn(BaseModel):
     security_label: str
     ticker: str
@@ -252,6 +262,14 @@ class MarketHistoryBackfillOut(ApiModel):
     failures: list[dict[str, str]] = []
 
 
+class IntradayMarketBackfillOut(ApiModel):
+    symbols: list[str]
+    source: str
+    interval: str
+    updated: int
+    failures: list[dict[str, str]] = []
+
+
 class PricedHoldingOut(ApiModel):
     ticker: str
     name: str | None = None
@@ -277,6 +295,15 @@ class PortfolioSummaryOut(ApiModel):
 
 class PortfolioHistoryPointOut(ApiModel):
     date: date
+    invested_amount: Decimal
+    market_value: Decimal
+    gain: Decimal
+    gain_percent: Decimal
+    benchmarks: dict[str, Decimal]
+
+
+class PortfolioIntradayHistoryPointOut(ApiModel):
+    timestamp: datetime
     invested_amount: Decimal
     market_value: Decimal
     gain: Decimal

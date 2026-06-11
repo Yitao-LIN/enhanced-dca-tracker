@@ -68,6 +68,7 @@ def _needs_legacy_baseline_stamp() -> bool:
         "accounts",
         "dca_settings",
         "import_sessions",
+        "market_price_intraday",
         "market_price_history",
         "market_prices",
         "portfolios",

@@ -29,6 +29,21 @@ class HistoricalMarketPrice:
 
 
 @dataclass(frozen=True)
+class IntradayMarketPrice:
+    symbol: str
+    price_at: datetime
+    interval: str
+    close: Decimal
+    open: Decimal | None = None
+    high: Decimal | None = None
+    low: Decimal | None = None
+    adjusted_close: Decimal | None = None
+    volume: int | None = None
+    currency: str = "USD"
+    source: str = "yfinance"
+
+
+@dataclass(frozen=True)
 class SymbolSearchResult:
     symbol: str
     name: str | None = None
@@ -136,6 +151,46 @@ class YFinanceMarketDataProvider(MarketDataProvider):
             source=source,
         )
 
+    def intraday_prices(
+        self,
+        symbol: str,
+        start_at: datetime,
+        end_at: datetime,
+        interval: str = "30m",
+        currency: str = "USD",
+        source: str = "yfinance",
+    ) -> list[IntradayMarketPrice]:
+        try:
+            import yfinance as yf
+        except ImportError as exc:
+            raise RuntimeError("Install yfinance to use live market data.") from exc
+
+        yfinance_logger = logging.getLogger("yfinance")
+        previous_level = yfinance_logger.level
+        yfinance_logger.setLevel(logging.CRITICAL)
+        try:
+            history = yf.download(
+                symbol,
+                start=start_at.isoformat(),
+                end=end_at.isoformat(),
+                interval=interval,
+                progress=False,
+                auto_adjust=False,
+                threads=False,
+            )
+        finally:
+            yfinance_logger.setLevel(previous_level)
+        if history.empty:
+            raise ValueError(f"No intraday market data returned for {symbol}")
+
+        return normalize_yfinance_intraday_history(
+            symbol=symbol,
+            history=history,
+            interval=interval,
+            currency=currency,
+            source=source,
+        )
+
 
 def normalize_yfinance_search_quotes(quotes: list[dict[str, object]], limit: int = 5) -> list[SymbolSearchResult]:
     results: list[SymbolSearchResult] = []
@@ -196,6 +251,48 @@ def normalize_yfinance_history(
             )
         )
     return points
+
+
+def normalize_yfinance_intraday_history(
+    symbol: str,
+    history: object,
+    interval: str,
+    currency: str = "USD",
+    source: str = "yfinance",
+) -> list[IntradayMarketPrice]:
+    history = _single_symbol_history_frame(symbol, history)
+    points: list[IntradayMarketPrice] = []
+    for index, row in history.iterrows():
+        close = _optional_decimal(row.get("Close"))
+        if close is None:
+            continue
+        price_at = _index_to_utc_datetime(index)
+        points.append(
+            IntradayMarketPrice(
+                symbol=symbol.upper(),
+                price_at=price_at,
+                interval=interval.lower(),
+                open=_optional_decimal(row.get("Open")),
+                high=_optional_decimal(row.get("High")),
+                low=_optional_decimal(row.get("Low")),
+                close=close,
+                adjusted_close=_optional_decimal(row.get("Adj Close")),
+                volume=_optional_int(row.get("Volume")),
+                currency=currency.upper(),
+                source=source.lower(),
+            )
+        )
+    return points
+
+
+def _index_to_utc_datetime(value: object) -> datetime:
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if not isinstance(value, datetime):
+        value = datetime.fromisoformat(str(value))
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _optional_decimal(value: object) -> Decimal | None:

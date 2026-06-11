@@ -140,6 +140,27 @@ class MarketPriceHistoryRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class IntradayMarketPriceRecord(Base):
+    __tablename__ = "market_price_intraday"
+    __table_args__ = (
+        UniqueConstraint("symbol", "price_at", "interval", "source", name="uq_market_price_intraday_symbol_at_interval_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    price_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    interval: Mapped[str] = mapped_column(String(8), default="30m", index=True)
+    open: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    high: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    low: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    close: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    adjusted_close: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), default="EUR")
+    source: Mapped[str] = mapped_column(String(32), default="yfinance")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class DcaSettingsRecord(Base):
     __tablename__ = "dca_settings"
     __table_args__ = (UniqueConstraint("portfolio_record_id", name="uq_dca_settings_portfolio"),)

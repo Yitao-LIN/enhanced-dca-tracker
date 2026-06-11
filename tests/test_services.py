@@ -1,7 +1,7 @@
 import io
 import unittest
 import zipfile
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from app.services.dca import calculate_enhanced_dca
 from app.services.market_data import normalize_yfinance_history, normalize_yfinance_search_quotes
 from app.services.portfolio import build_holdings, summarize_portfolio
 from app.services.portfolio_history import build_portfolio_history
+from app.services.portfolio_intraday import build_portfolio_intraday_history
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -199,6 +200,33 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(history[1].market_value, Decimal("240.00"))
         self.assertEqual(history[1].benchmarks["^GSPC"], Decimal("222.20"))
         self.assertEqual(history[1].benchmarks["^NDX"], Decimal("222.20"))
+
+    def test_build_portfolio_intraday_history_with_normalized_benchmarks(self):
+        transactions = [
+            Transaction(
+                transaction_date=date(2026, 6, 9),
+                ticker="PSP5.PA",
+                transaction_type=TransactionType.BUY,
+                quantity=Decimal("2"),
+                price=Decimal("55"),
+            )
+        ]
+        first_tick = datetime(2026, 6, 9, 9, 0)
+        second_tick = datetime(2026, 6, 9, 9, 30)
+
+        history = build_portfolio_intraday_history(
+            transactions,
+            prices_by_symbol={"PSP5.PA": {first_tick: Decimal("56"), second_tick: Decimal("57")}},
+            benchmarks_by_symbol={"^GSPC": {first_tick: Decimal("6000"), second_tick: Decimal("6060")}},
+            start_at=datetime(2026, 6, 8, 9, 0),
+            end_at=second_tick,
+        )
+
+        self.assertEqual([point.timestamp for point in history], [first_tick, second_tick])
+        self.assertEqual(history[0].invested_amount, Decimal("110.00"))
+        self.assertEqual(history[0].market_value, Decimal("112.00"))
+        self.assertEqual(history[1].market_value, Decimal("114.00"))
+        self.assertEqual(history[1].benchmarks["^GSPC"], Decimal("113.12"))
 
 
 class DcaTests(unittest.TestCase):

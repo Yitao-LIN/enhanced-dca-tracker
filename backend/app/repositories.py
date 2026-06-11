@@ -15,6 +15,7 @@ from app.models import (
     DcaSettingsRecord,
     HiddenSecurityRecord,
     ImportSessionRecord,
+    IntradayMarketPriceRecord,
     MarketPriceRecord,
     MarketPriceHistoryRecord,
     PortfolioRecord,
@@ -56,6 +57,21 @@ class MarketPriceHistoryPoint:
     volume: int | None = None
     currency: str = "EUR"
     source: str = "manual"
+
+
+@dataclass(frozen=True)
+class IntradayMarketPricePoint:
+    symbol: str
+    price_at: datetime
+    interval: str
+    close: Decimal
+    open: Decimal | None = None
+    high: Decimal | None = None
+    low: Decimal | None = None
+    adjusted_close: Decimal | None = None
+    volume: int | None = None
+    currency: str = "EUR"
+    source: str = "yfinance"
 
 
 @dataclass(frozen=True)
@@ -643,6 +659,73 @@ def list_market_price_history(
     if source is not None:
         statement = statement.where(MarketPriceHistoryRecord.source == source.lower())
     statement = statement.order_by(MarketPriceHistoryRecord.price_date, MarketPriceHistoryRecord.source)
+    return list(db.scalars(statement))
+
+
+def upsert_intraday_market_price(
+    db: Session,
+    point: IntradayMarketPricePoint,
+    commit: bool = True,
+) -> IntradayMarketPriceRecord:
+    normalized_symbol = point.symbol.upper()
+    normalized_source = point.source.lower()
+    normalized_interval = point.interval.lower()
+    statement = select(IntradayMarketPriceRecord).where(
+        IntradayMarketPriceRecord.symbol == normalized_symbol,
+        IntradayMarketPriceRecord.price_at == point.price_at,
+        IntradayMarketPriceRecord.interval == normalized_interval,
+        IntradayMarketPriceRecord.source == normalized_source,
+    )
+    record = db.scalar(statement)
+    if record is None:
+        record = IntradayMarketPriceRecord(
+            symbol=normalized_symbol,
+            price_at=point.price_at,
+            interval=normalized_interval,
+            close=point.close,
+        )
+        db.add(record)
+
+    record.open = point.open
+    record.high = point.high
+    record.low = point.low
+    record.close = point.close
+    record.adjusted_close = point.adjusted_close
+    record.volume = point.volume
+    record.currency = point.currency.upper()
+    record.source = normalized_source
+
+    if commit:
+        db.commit()
+        db.refresh(record)
+    return record
+
+
+def upsert_intraday_market_prices_many(db: Session, points: list[IntradayMarketPricePoint]) -> int:
+    for point in points:
+        upsert_intraday_market_price(db, point, commit=False)
+    db.commit()
+    return len(points)
+
+
+def list_intraday_market_prices(
+    db: Session,
+    symbol: str,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    interval: str | None = None,
+    source: str | None = None,
+) -> list[IntradayMarketPriceRecord]:
+    statement = select(IntradayMarketPriceRecord).where(IntradayMarketPriceRecord.symbol == symbol.upper())
+    if start_at is not None:
+        statement = statement.where(IntradayMarketPriceRecord.price_at >= start_at)
+    if end_at is not None:
+        statement = statement.where(IntradayMarketPriceRecord.price_at <= end_at)
+    if interval is not None:
+        statement = statement.where(IntradayMarketPriceRecord.interval == interval.lower())
+    if source is not None:
+        statement = statement.where(IntradayMarketPriceRecord.source == source.lower())
+    statement = statement.order_by(IntradayMarketPriceRecord.price_at, IntradayMarketPriceRecord.source)
     return list(db.scalars(statement))
 
 
