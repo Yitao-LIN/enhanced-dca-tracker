@@ -201,6 +201,25 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(history[1].benchmarks["^GSPC"], Decimal("222.20"))
         self.assertEqual(history[1].benchmarks["^NDX"], Decimal("222.20"))
 
+    def test_portfolio_history_starts_at_first_transaction(self):
+        transactions = [
+            Transaction(
+                transaction_date=date(2026, 6, 4),
+                ticker="PSP5.PA",
+                transaction_type=TransactionType.BUY,
+                quantity=Decimal("2"),
+                price=Decimal("55.62"),
+            )
+        ]
+
+        history = build_portfolio_history(
+            transactions,
+            prices_by_symbol={"PSP5.PA": {date(2026, 6, 4): Decimal("55.62"), date(2026, 6, 5): Decimal("56")}},
+            benchmarks_by_symbol={"^GSPC": {date(2025, 12, 31): Decimal("6000"), date(2026, 6, 4): Decimal("6500")}},
+        )
+
+        self.assertEqual([point.price_date for point in history], [date(2026, 6, 4), date(2026, 6, 5)])
+
     def test_build_portfolio_intraday_history_with_normalized_benchmarks(self):
         transactions = [
             Transaction(

@@ -76,6 +76,11 @@ def _timeline_dates(
     start_date: date | None,
     end_date: date | None,
 ) -> list[date]:
+    first_transaction_date = min((transaction.transaction_date for transaction in transactions), default=None)
+    effective_start_date = start_date
+    if first_transaction_date is not None:
+        effective_start_date = max(start_date, first_transaction_date) if start_date is not None else first_transaction_date
+
     dates = {transaction.transaction_date for transaction in transactions}
     for history in list(prices_by_symbol.values()) + list(benchmarks_by_symbol.values()):
         dates.update(history.keys())
@@ -83,7 +88,7 @@ def _timeline_dates(
     return sorted(
         candidate
         for candidate in dates
-        if (start_date is None or candidate >= start_date) and (end_date is None or candidate <= end_date)
+        if (effective_start_date is None or candidate >= effective_start_date) and (end_date is None or candidate <= end_date)
     )
 
 
