@@ -554,6 +554,40 @@ def list_transactions(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> 
     return [_transaction_from_record(record) for record in db.scalars(statement)]
 
 
+def delete_transactions_for_ticker(db: Session, ticker: str, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> int:
+    slug = _normalize_slug(portfolio_id)
+    normalized_ticker = ticker.strip().upper()
+    if not normalized_ticker:
+        return 0
+
+    records = list(
+        db.scalars(
+            select(TransactionRecord).where(
+                TransactionRecord.portfolio_id == slug,
+                TransactionRecord.ticker == normalized_ticker,
+            )
+        )
+    )
+    if not records:
+        delete_hidden_security(db, normalized_ticker, portfolio_id=slug)
+        return 0
+
+    record_ids = [record.id for record in records]
+    for fingerprint in db.scalars(
+        select(TransactionFingerprintRecord).where(
+            TransactionFingerprintRecord.portfolio_id == slug,
+            TransactionFingerprintRecord.transaction_record_id.in_(record_ids),
+        )
+    ):
+        db.delete(fingerprint)
+    for record in records:
+        db.delete(record)
+
+    delete_hidden_security(db, normalized_ticker, portfolio_id=slug)
+    db.commit()
+    return len(records)
+
+
 def count_transactions(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> int:
     return len(list_transactions(db, portfolio_id))
 

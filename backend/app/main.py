@@ -22,6 +22,7 @@ from app.repositories import (
     create_portfolio,
     delete_hidden_security,
     delete_security_mapping,
+    delete_transactions_for_ticker,
     ensure_account,
     existing_transaction_fingerprints,
     get_dca_settings as load_dca_settings,
@@ -289,6 +290,15 @@ def list_transactions(
     db: Session = Depends(get_db),
 ) -> list[Transaction]:
     return load_transactions(db, portfolio_id=portfolio_id)
+
+
+@app.delete("/api/transactions/{ticker}", response_model=DeletedCountOut)
+def remove_transactions_for_ticker(
+    ticker: str,
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    return {"deleted": delete_transactions_for_ticker(db, ticker=ticker, portfolio_id=portfolio_id)}
 
 
 @app.get("/api/security-mappings", response_model=list[SecurityMappingOut])

@@ -1685,6 +1685,22 @@
           }
         }
 
+        async function deleteSecurity(ticker) {
+          const symbol = String(ticker || "").trim().toUpperCase();
+          if (!apiAvailable || !symbol) return;
+          const confirmed = window.confirm(`Delete all imported transactions for ${symbol}? You can import them again later.`);
+          if (!confirmed) return;
+          try {
+            const result = await apiRequest(`/api/transactions/${encodeURIComponent(symbol)}?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+              method: "DELETE",
+            });
+            await refreshBackendData(selectedPortfolioId, { autoBackfill: false });
+            setStatus(`Deleted ${result.deleted} transaction(s) for ${symbol}. You can import them again.`);
+          } catch (error) {
+            setStatus(`Delete failed: ${error.message}`);
+          }
+        }
+
         async function backfillMarketHistory(portfolioId, visibleHoldings, historyRows = []) {
           const symbols = Array.from(new Set([
             ...(visibleHoldings || []).map((holding) => holding.ticker),
@@ -2001,7 +2017,10 @@
                             <td className="num">{holding.allocation.toFixed(1)}%</td>
                             {apiAvailable && (
                               <td>
-                                <button disabled={apiLoading} onClick={() => hideSecurity(holding.ticker)}>Hide</button>
+                                <div className="actions">
+                                  <button disabled={apiLoading} onClick={() => hideSecurity(holding.ticker)}>Hide</button>
+                                  <button disabled={apiLoading} onClick={() => deleteSecurity(holding.ticker)}>Delete</button>
+                                </div>
                               </td>
                             )}
                           </tr>

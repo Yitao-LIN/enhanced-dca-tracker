@@ -678,6 +678,46 @@ class ApiRouteTests(unittest.TestCase):
             },
         )
 
+    def test_delete_ticker_transactions_allows_reimport(self):
+        mapping_payload = [
+            {"security_label": "AMUNDI PEA S&P 500 UCITS ETF ACC", "ticker": "PSP5.PA", "provider": "manual"},
+        ]
+        first_upload = self.client.post(
+            "/api/transactions/upload?portfolio_id=default",
+            files={"file": ("fortuneo_bourse_mapping.zip", load_fixture_bytes("fortuneo_bourse_mapping.zip"), "application/zip")},
+            data={"mappings": json.dumps(mapping_payload)},
+        )
+        self.assertEqual(first_upload.status_code, 200)
+        self.assertEqual(first_upload.json()["imported"], 1)
+
+        duplicate_preview = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("fortuneo_bourse_mapping.zip", load_fixture_bytes("fortuneo_bourse_mapping.zip"), "application/zip")},
+        )
+        self.assertEqual(duplicate_preview.status_code, 200)
+        self.assertEqual(duplicate_preview.json()["rows"][0]["status"], "duplicate_existing")
+
+        self.client.put("/api/hidden-securities?portfolio_id=default", json={"ticker": "PSP5.PA"})
+        deleted = self.client.delete("/api/transactions/PSP5.PA?portfolio_id=default")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json(), {"deleted": 1})
+        self.assertEqual(self.client.get("/api/transactions?portfolio_id=default").json(), [])
+        self.assertEqual(self.client.get("/api/hidden-securities?portfolio_id=default").json(), [])
+
+        preview_after_delete = self.client.post(
+            "/api/transactions/preview?portfolio_id=default",
+            files={"file": ("fortuneo_bourse_mapping.zip", load_fixture_bytes("fortuneo_bourse_mapping.zip"), "application/zip")},
+        )
+        self.assertEqual(preview_after_delete.status_code, 200)
+        self.assertEqual(preview_after_delete.json()["rows"][0]["status"], "new")
+
+        second_upload = self.client.post(
+            "/api/transactions/upload?portfolio_id=default",
+            files={"file": ("fortuneo_bourse_mapping.zip", load_fixture_bytes("fortuneo_bourse_mapping.zip"), "application/zip")},
+        )
+        self.assertEqual(second_upload.status_code, 200)
+        self.assertEqual(second_upload.json()["imported"], 1)
+
     def test_preview_keeps_mapping_row_editable_when_search_fails(self):
         app.dependency_overrides[get_symbol_search_provider] = lambda: StubSearchProvider(error=RuntimeError("search offline"))
 
