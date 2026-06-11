@@ -1,3 +1,7 @@
+"""@file
+@brief SQLAlchemy engine, session, and startup migration wiring.
+"""
+
 from __future__ import annotations
 
 import os
@@ -15,10 +19,13 @@ DATABASE_URL = os.getenv("INVESTMENT_TRACKER_DATABASE_URL", f"sqlite:///{DEFAULT
 
 
 class Base(DeclarativeBase):
+    """@brief Declarative base shared by all ORM model classes."""
+
     pass
 
 
 def _connect_args(database_url: str) -> dict[str, object]:
+    """@brief Build SQLAlchemy connection arguments for the configured database URL."""
     if database_url.startswith("sqlite"):
         if database_url.startswith("sqlite:///") and database_url != "sqlite:///:memory:":
             sqlite_path = Path(database_url.removeprefix("sqlite:///"))
@@ -32,6 +39,7 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expi
 
 
 def initialize_database() -> None:
+    """@brief Bring the configured database to the latest schema before serving requests."""
     try:
         from alembic import command
         from alembic.config import Config
@@ -56,12 +64,14 @@ def initialize_database() -> None:
 
 
 def create_db_and_tables() -> None:
+    """@brief Create ORM tables directly when Alembic is unavailable."""
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 
 
 def _needs_legacy_baseline_stamp() -> bool:
+    """@brief Detect pre-Alembic local databases that need stamping instead of replayed migrations."""
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     app_tables = {
@@ -80,6 +90,7 @@ def _needs_legacy_baseline_stamp() -> bool:
 
 
 def get_db() -> Generator[Session, None, None]:
+    """@brief Yield one SQLAlchemy session for a FastAPI request and close it afterward."""
     db = SessionLocal()
     try:
         yield db

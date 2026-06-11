@@ -48,7 +48,10 @@ It can:
 - save manually edited market prices through the API;
 - compute holdings locally;
 - let the user manually edit current market prices;
-- display total value, invested amount, gains, allocation, and DCA recommendation.
+- display total value, invested amount, gains, allocation, and DCA recommendation;
+- backfill daily and intraday market history for visible holdings and benchmarks;
+- hide securities from tracking without deleting their transactions;
+- delete all transactions for a ticker when an import needs to be redone.
 
 If the backend is unavailable, the frontend falls back to demo mode and computes locally. This keeps the prototype useful even before the API is running.
 
@@ -76,19 +79,25 @@ GET    /api/accounts
 POST   /api/accounts
 GET    /api/transactions
 POST   /api/transactions
+DELETE /api/transactions/{ticker}
 POST   /api/transactions/preview
 POST   /api/transactions/upload
 GET    /api/security-mappings
 PUT    /api/security-mappings
 DELETE /api/security-mappings
+GET    /api/hidden-securities
+PUT    /api/hidden-securities
+DELETE /api/hidden-securities
 GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
 PUT    /api/market/history
 GET    /api/market/history/{ticker}
 POST   /api/market/history/backfill
+POST   /api/market/intraday/backfill
 GET    /api/portfolio
 GET    /api/portfolio/history
+GET    /api/portfolio/history/intraday
 GET    /api/dca/settings
 PUT    /api/dca/settings
 POST   /api/dca/recommendation
@@ -159,6 +168,9 @@ TransactionIn
 PriceMap
 MarketPriceHistoryIn
 MarketHistoryBackfillRequest
+IntradayMarketBackfillRequest
+SecurityMappingIn
+HiddenSecurityIn
 DcaSettingsIn
 DcaRequest
 ```
@@ -171,9 +183,15 @@ AccountOut
 TransactionOut
 ImportPreviewOut
 ImportSummaryOut
+SymbolSearchCandidateOut
+SecurityMappingOut
+HiddenSecurityOut
 MarketPriceHistoryPointOut
+MarketHistoryBackfillOut
+IntradayMarketBackfillOut
 PortfolioSummaryOut
 PortfolioHistoryPointOut
+PortfolioIntradayHistoryPointOut
 DcaSettingsOut
 DcaRecommendationOut
 ```
@@ -241,8 +259,10 @@ Alembic owns schema changes. The current migration chain creates:
 - transaction fingerprints;
 - import sessions;
 - security label mappings;
-- latest market prices.
-- historical market prices.
+- hidden securities;
+- latest market prices;
+- daily historical market prices;
+- intraday historical market prices;
 - DCA settings.
 
 Run migrations manually from `backend/`:
@@ -274,8 +294,10 @@ TransactionRecord
 TransactionFingerprintRecord
 ImportSessionRecord
 SecurityMappingRecord
+HiddenSecurityRecord
 MarketPriceRecord
 MarketPriceHistoryRecord
+IntradayMarketPriceRecord
 DcaSettingsRecord
 ```
 
@@ -343,6 +365,14 @@ Important fields:
 - `provider`
 - provider metadata such as name, exchange, quote type, and currency
 
+`HiddenSecurityRecord` stores per-portfolio tickers that should be excluded from tracking views without deleting the underlying transactions.
+
+Important fields:
+
+- `portfolio_record_id`
+- `ticker`
+- `created_at`
+
 `MarketPriceRecord` stores the latest known market price for each symbol.
 
 Important fields:
@@ -369,7 +399,23 @@ Important fields:
 - `currency`
 - `source`
 
-The latest-price table is useful for current portfolio valuation. The history table backs real performance charts, S&P 500/Nasdaq 100 benchmark comparisons, and backfills from providers such as Yahoo Finance.
+`IntradayMarketPriceRecord` stores one intraday price point per symbol, timestamp, interval, and source.
+
+Important fields:
+
+- `symbol`
+- `price_at`
+- `interval`
+- `open`
+- `high`
+- `low`
+- `close`
+- `adjusted_close`
+- `volume`
+- `currency`
+- `source`
+
+The latest-price table is useful for current portfolio valuation. The daily and intraday history tables back real performance charts, S&P 500/Nasdaq 100 benchmark comparisons, and backfills from providers such as Yahoo Finance.
 
 `DcaSettingsRecord` stores portfolio-specific DCA preferences, including base amount, preferred benchmark, multiplier bounds, and contribution frequency.
 
@@ -389,11 +435,14 @@ They know how to:
 - create transaction fingerprints;
 - save import sessions;
 - save and load per-portfolio security label mappings;
+- save and load per-portfolio hidden securities;
 - skip duplicate transaction imports;
+- delete all transactions for a ticker and clear its import fingerprints;
 - load database rows back into `Transaction` dataclasses;
 - save or update market prices;
 - save or update historical market prices;
 - read historical market prices by symbol, date range, and source;
+- save and read intraday market prices by symbol, timestamp range, interval, and source;
 - save and load DCA settings;
 - return current prices as a `{ticker: price}` dictionary.
 
@@ -409,15 +458,21 @@ add_transaction()
 add_transactions()
 import_transactions()
 list_transactions()
+delete_transactions_for_ticker()
 count_transactions()
 upsert_market_price()
 get_market_prices()
 upsert_market_price_history_many()
 list_market_price_history()
+upsert_intraday_market_prices_many()
+list_intraday_market_prices()
 get_dca_settings()
 upsert_dca_settings()
 get_security_mapping_symbols()
 upsert_security_mappings()
+list_hidden_securities()
+upsert_hidden_security()
+delete_hidden_security()
 ```
 
 This keeps SQLAlchemy code out of `main.py` and out of the business calculation services.
@@ -535,16 +590,18 @@ YFinanceMarketDataProvider
 
 `StaticMarketDataProvider` is useful for tests or manual prices.
 
-`YFinanceMarketDataProvider` uses `yfinance` to fetch quotes, historical prices, and ticker search candidates for unresolved Fortuneo labels.
+`YFinanceMarketDataProvider` uses `yfinance` to fetch quotes, daily historical prices, intraday historical prices, and ticker search candidates for unresolved Fortuneo labels.
 
 The API route:
 
 ```text
 GET /api/market/{ticker}
 GET /api/securities/search?query=AMUNDI%20MSCI%20WORLD
+POST /api/market/history/backfill
+POST /api/market/intraday/backfill
 ```
 
-Quote routes save fetched prices into SQLite. Search routes return normalized Yahoo Finance candidates without writing to the database.
+Quote and backfill routes save fetched prices into SQLite. Search routes return normalized Yahoo Finance candidates without writing to the database.
 
 ## Tests
 
@@ -577,7 +634,7 @@ Keeps the synthetic golden fixture dataset aligned with parser, portfolio summar
 tests/test_api_routes.py
 ```
 
-Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV errors.
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, ticker deletion/re-import, portfolio summary, market history, intraday market history, DCA settings, DCA recommendation, and validation errors.
 
 ## Current Data Flows
 
@@ -663,12 +720,35 @@ DELETE /api/security-mappings?portfolio_id=default&security_label=AMUNDI%20MSCI%
   -> list/upsert/delete SecurityMappingRecord rows scoped to one portfolio
 ```
 
+Hidden security tracking:
+
+```text
+GET /api/hidden-securities?portfolio_id=default
+PUT /api/hidden-securities?portfolio_id=default
+DELETE /api/hidden-securities?portfolio_id=default&ticker=CW8.PA
+  -> list/upsert/delete HiddenSecurityRecord rows scoped to one portfolio
+  -> portfolio summaries and histories filter these tickers out
+  -> transactions remain persisted and duplicate detection remains intact
+```
+
+Ticker transaction deletion:
+
+```text
+DELETE /api/transactions/{ticker}?portfolio_id=default
+  -> delete_transactions_for_ticker()
+    -> removes matching TransactionRecord rows
+    -> removes matching TransactionFingerprintRecord rows
+    -> clears any HiddenSecurityRecord for that ticker
+    -> allows the same ticker rows to be imported again later
+```
+
 Portfolio summary:
 
 ```text
 GET /api/portfolio?portfolio_id=default
-  -> list_transactions()
+  -> _visible_transactions()
     -> SQLite rows converted to Transaction dataclasses
+    -> hidden tickers filtered out
   -> get_market_prices()
     -> latest prices from SQLite
   -> summarize_portfolio()
@@ -708,22 +788,47 @@ POST /api/market/history/backfill
   -> YFinanceMarketDataProvider.historical_prices()
   -> upsert_market_price_history_many()
     -> SQLite market_price_history table
+  -> upsert_market_price()
+    -> latest market_prices row for each symbol
+```
+
+Intraday market backfill:
+
+```text
+POST /api/market/intraday/backfill
+  -> YFinanceMarketDataProvider.intraday_prices()
+  -> upsert_intraday_market_prices_many()
+    -> SQLite market_price_intraday table
+  -> upsert_market_price()
+    -> latest market_prices row for each symbol
 ```
 
 Portfolio history:
 
 ```text
 GET /api/portfolio/history
-  -> list_transactions()
+  -> _visible_transactions()
   -> list_market_price_history()
   -> build_portfolio_history()
     -> invested, value, gain, S&P 500, Nasdaq 100 series
+```
+
+Intraday portfolio history:
+
+```text
+GET /api/portfolio/history/intraday
+  -> _visible_transactions()
+  -> list_intraday_market_prices()
+  -> optional daily-history fallback when a requested intraday range has no intraday rows
+  -> build_portfolio_intraday_history()
+    -> timestamped invested, value, gain, S&P 500, Nasdaq 100 series
 ```
 
 DCA recommendation:
 
 ```text
 POST /api/dca/recommendation
+  -> optional list_market_price_history() for preferred benchmark movement
   -> calculate_enhanced_dca()
     -> DcaRecommendation
 ```

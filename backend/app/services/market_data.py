@@ -1,3 +1,7 @@
+"""@file
+@brief Market-data provider abstractions and yfinance normalization helpers.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,6 +20,8 @@ DEFAULT_BENCHMARKS = {
 
 @dataclass(frozen=True)
 class HistoricalMarketPrice:
+    """@brief Normalized daily market-price point from a provider."""
+
     symbol: str
     price_date: date
     close: Decimal
@@ -30,6 +36,8 @@ class HistoricalMarketPrice:
 
 @dataclass(frozen=True)
 class IntradayMarketPrice:
+    """@brief Normalized intraday market-price point from a provider."""
+
     symbol: str
     price_at: datetime
     interval: str
@@ -45,6 +53,8 @@ class IntradayMarketPrice:
 
 @dataclass(frozen=True)
 class SymbolSearchResult:
+    """@brief Normalized ticker-search candidate."""
+
     symbol: str
     name: str | None = None
     exchange: str | None = None
@@ -55,11 +65,16 @@ class SymbolSearchResult:
 
 
 class MarketDataProvider:
+    """@brief Interface for market quote providers."""
+
     def quote(self, symbol: str) -> MarketSnapshot:
+        """@brief Fetch the latest quote for a symbol."""
         raise NotImplementedError
 
 
 class StaticMarketDataProvider(MarketDataProvider):
+    """@brief Deterministic in-memory market-data provider used by tests."""
+
     def __init__(self, quotes: dict[str, Decimal] | None = None) -> None:
         self.quotes = quotes or {}
 
@@ -69,7 +84,10 @@ class StaticMarketDataProvider(MarketDataProvider):
 
 
 class YFinanceMarketDataProvider(MarketDataProvider):
+    """@brief yfinance-backed provider for quotes, history, intraday data, and search."""
+
     def quote(self, symbol: str) -> MarketSnapshot:
+        """@brief Fetch a recent quote from yfinance and derive percentage-change inputs."""
         try:
             import yfinance as yf
         except ImportError as exc:
@@ -93,6 +111,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         )
 
     def search_symbols(self, query: str, limit: int = 5) -> list[SymbolSearchResult]:
+        """@brief Search Yahoo Finance for ticker candidates matching a free-text label."""
         try:
             import yfinance as yf
         except ImportError as exc:
@@ -122,6 +141,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         currency: str = "USD",
         source: str = "yfinance",
     ) -> list[HistoricalMarketPrice]:
+        """@brief Fetch and normalize daily historical prices from yfinance."""
         try:
             import yfinance as yf
         except ImportError as exc:
@@ -160,6 +180,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         currency: str = "USD",
         source: str = "yfinance",
     ) -> list[IntradayMarketPrice]:
+        """@brief Fetch and normalize intraday historical prices from yfinance."""
         try:
             import yfinance as yf
         except ImportError as exc:
@@ -193,6 +214,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
 
 
 def normalize_yfinance_search_quotes(quotes: list[dict[str, object]], limit: int = 5) -> list[SymbolSearchResult]:
+    """@brief Convert raw yfinance search quotes into unique normalized candidates."""
     results: list[SymbolSearchResult] = []
     seen_symbols: set[str] = set()
     for index, quote in enumerate(quotes):
@@ -230,6 +252,7 @@ def normalize_yfinance_history(
     currency: str = "USD",
     source: str = "yfinance",
 ) -> list[HistoricalMarketPrice]:
+    """@brief Convert a yfinance daily history frame into provider-neutral points."""
     history = _single_symbol_history_frame(symbol, history)
     points: list[HistoricalMarketPrice] = []
     for index, row in history.iterrows():
@@ -260,6 +283,7 @@ def normalize_yfinance_intraday_history(
     currency: str = "USD",
     source: str = "yfinance",
 ) -> list[IntradayMarketPrice]:
+    """@brief Convert a yfinance intraday history frame into provider-neutral points."""
     history = _single_symbol_history_frame(symbol, history)
     points: list[IntradayMarketPrice] = []
     for index, row in history.iterrows():
@@ -326,6 +350,7 @@ def _optional_text(value: object, upper: bool = False) -> str | None:
 
 
 def _single_symbol_history_frame(symbol: str, history: object) -> object:
+    """@brief Select one symbol from yfinance's sometimes-multi-index history frame."""
     columns = getattr(history, "columns", None)
     if not hasattr(columns, "nlevels") or columns.nlevels <= 1:
         return history

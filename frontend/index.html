@@ -574,6 +574,10 @@
     <div id="root"></div>
 
     <script type="text/babel">
+      /**
+       * @file
+       * @brief Standalone React dashboard for local portfolio tracking and backend sync.
+       */
       const { useEffect, useMemo, useState } = React;
       const API_BASE_URL = localStorage.getItem("trackerApiBaseUrl") || "http://127.0.0.1:8000";
       const BENCHMARK_SYMBOLS = ["^GSPC", "^NDX"];
@@ -606,6 +610,7 @@
         holdings: [],
       };
 
+      /** @brief Format a numeric EUR value for compact dashboard display. */
       function money(value) {
         return new Intl.NumberFormat("fr-FR", {
           style: "currency",
@@ -618,6 +623,7 @@
         return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
       }
 
+      /** @brief Parse French or English decimal strings without losing dot-decimal prices. */
       function parseNumber(value) {
         if (!value) return 0;
         let normalized = String(value).trim().replace(/\s/g, "").replace(/[^0-9,.-]/g, "");
@@ -650,6 +656,7 @@
         return Boolean(chartRangeConfig(rangeKey).intraday);
       }
 
+      /** @brief Build daily-history query dates for the selected chart range. */
       function chartDateRange(rangeKey) {
         const end = new Date();
         const range = chartRangeConfig(rangeKey);
@@ -664,6 +671,7 @@
         return params;
       }
 
+      /** @brief Build intraday-history query timestamps for short chart ranges. */
       function chartDateTimeRange(rangeKey) {
         const end = new Date();
         const range = chartRangeConfig(rangeKey);
@@ -683,6 +691,7 @@
           .join("&");
       }
 
+      /** @brief Fetch JSON from the FastAPI backend and surface readable error messages. */
       async function apiRequest(path, options = {}) {
         let response;
         try {
@@ -717,6 +726,7 @@
         return result.map((item) => item.trim());
       }
 
+      /** @brief Parse the local demo CSV path when the backend is unavailable. */
       function parseCsv(text) {
         const lines = text.split(/\r?\n/).filter((line) => line.trim());
         if (!lines.length) return [];
@@ -751,6 +761,7 @@
         }).filter((row) => row.ticker && row.quantity > 0);
       }
 
+      /** @brief Mirror the backend average-cost holding calculation for demo mode. */
       function buildHoldings(transactions, prices) {
         const lots = {};
         transactions.forEach((transaction) => {
@@ -760,6 +771,7 @@
             lots[key].quantity += transaction.quantity;
             lots[key].cost += transaction.quantity * transaction.price + transaction.fees;
           } else if (transaction.type === "sell" && lots[key].quantity > 0) {
+            // Demo mode mirrors backend average-cost reduction after a sell.
             const sold = Math.min(transaction.quantity, lots[key].quantity);
             const avg = lots[key].cost / lots[key].quantity;
             lots[key].quantity -= sold;
@@ -802,6 +814,7 @@
         }));
       }
 
+      /** @brief Mirror the backend Enhanced DCA rule when running in demo mode. */
       function calculateDca(baseAmount, marketChange, volatility) {
         let multiplier = 1;
         if (marketChange <= -5) multiplier = 1.5;
@@ -891,6 +904,7 @@
         return Array.from(indexes).sort((a, b) => a - b);
       }
 
+      /** @brief SVG line chart for portfolio value and optional normalized benchmarks. */
       function LineChart({ data, visibleBenchmarks }) {
         const [hoverPoint, setHoverPoint] = useState(null);
         const width = 820;
@@ -1042,6 +1056,7 @@
         );
       }
 
+      /** @brief Root React component for import, tracking, charting, and DCA workflows. */
       function App() {
         const [transactions, setTransactions] = useState(() => parseCsv(sampleCsv));
         const [prices, setPrices] = useState(initialPrices);
@@ -1512,6 +1527,7 @@
           );
         }
 
+        /** @brief Probe FastAPI and load backend-backed dashboard state. */
         async function connectBackend() {
           setApiLoading(true);
           try {
@@ -1534,6 +1550,7 @@
           });
         }
 
+        /** @brief Select the daily or intraday history endpoint for the active chart range. */
         function historyPath(portfolioId = selectedPortfolioId) {
           if (isIntradayRange(chartRange)) {
             return `/api/portfolio/history/intraday?${queryString({
@@ -1544,6 +1561,7 @@
           return `/api/portfolio/history?${historyQuery(portfolioId)}`;
         }
 
+        /** @brief Refresh all backend-backed state needed by the dashboard in one pass. */
         async function refreshBackendData(portfolioId = selectedPortfolioId, options = {}) {
           const { autoBackfill = false, quiet = false } = options;
           setApiLoading(true);
@@ -1671,6 +1689,7 @@
           }
         }
 
+        /** @brief Hide a ticker from tracking without deleting source transactions. */
         async function hideSecurity(ticker) {
           const symbol = String(ticker || "").trim().toUpperCase();
           if (!apiAvailable || !symbol) return;
@@ -1687,6 +1706,7 @@
           }
         }
 
+        /** @brief Restore a previously hidden ticker to tracking views. */
         async function restoreSecurity(ticker) {
           const symbol = String(ticker || "").trim().toUpperCase();
           if (!apiAvailable || !symbol) return;
@@ -1701,6 +1721,7 @@
           }
         }
 
+        /** @brief Delete all imported rows for a ticker so the user can re-import cleanly. */
         async function deleteSecurity(ticker) {
           const symbol = String(ticker || "").trim().toUpperCase();
           if (!apiAvailable || !symbol) return;
@@ -1717,6 +1738,7 @@
           }
         }
 
+        /** @brief Backfill daily or intraday market history for visible holdings and benchmarks. */
         async function backfillMarketHistory(portfolioId, visibleHoldings, historyRows = []) {
           const symbols = Array.from(new Set([
             ...(visibleHoldings || []).map((holding) => holding.ticker),
@@ -1725,6 +1747,7 @@
           if (!symbols.length) return null;
           try {
             if (isIntradayRange(chartRange)) {
+              // Short chart ranges prefer intraday rows; the backend can fall back to daily rows.
               const range = chartDateTimeRange(chartRange);
               return await apiRequest("/api/market/intraday/backfill", {
                 method: "POST",
@@ -1812,6 +1835,7 @@
           }
         }
 
+        /** @brief Preview a selected CSV/ZIP through the backend, or parse locally in demo mode. */
         async function importFile(event) {
           const file = event.target.files?.[0];
           if (!file) return;
@@ -1848,6 +1872,7 @@
           }
         }
 
+        /** @brief Upload the pending file plus confirmed security mappings to the backend. */
         async function confirmImport() {
           if (!canConfirmImport) return;
           const file = pendingImportFile;

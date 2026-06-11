@@ -1,3 +1,7 @@
+"""@file
+@brief Golden fixture consistency tests for imports, summaries, and history.
+"""
+
 import json
 import unittest
 from datetime import date

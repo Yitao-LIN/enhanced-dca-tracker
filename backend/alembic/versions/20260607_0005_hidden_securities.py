@@ -1,5 +1,7 @@
 """Add hidden securities.
 
+@brief Add hidden securities for tracking filters.
+
 Revision ID: 20260607_0005
 Revises: 20260530_0004
 Create Date: 2026-06-07 00:00:00

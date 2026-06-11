@@ -1,3 +1,7 @@
+"""@file
+@brief Portfolio holding construction and valuation calculations.
+"""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -14,6 +18,7 @@ from app.domain import (
 
 
 def build_holdings(transactions: list[Transaction]) -> list[Holding]:
+    """@brief Net buy/sell transactions into open holdings with adjusted cost basis."""
     lots: dict[str, dict[str, Decimal | str]] = defaultdict(
         lambda: {"quantity": Decimal("0"), "cost": Decimal("0"), "currency": "EUR", "name": ""}
     )
@@ -33,6 +38,7 @@ def build_holdings(transactions: list[Transaction]) -> list[Holding]:
             if transaction.description and not str(position["name"]).strip():
                 position["name"] = transaction.description
         elif transaction.transaction_type == TransactionType.SELL and quantity > 0:
+            # Selling reduces the remaining lot cost at average cost, not at sale proceeds.
             average_cost = cost / quantity
             sold_quantity = min(transaction.quantity, quantity)
             quantity -= sold_quantity
@@ -61,6 +67,7 @@ def build_holdings(transactions: list[Transaction]) -> list[Holding]:
 
 
 def summarize_portfolio(transactions: list[Transaction], current_prices: dict[str, Decimal]) -> PortfolioSummary:
+    """@brief Price open holdings and compute portfolio-level performance metrics."""
     holdings = build_holdings(transactions)
     total_value = sum(
         (

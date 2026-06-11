@@ -1,3 +1,7 @@
+"""@file
+@brief Pure domain objects and money helpers used by services and API schemas.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,10 +14,13 @@ Money = Decimal
 
 
 def quantize_money(value: Decimal) -> Decimal:
+    """@brief Round a decimal to cents using financial half-up rounding."""
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class TransactionType(str, Enum):
+    """@brief Supported transaction categories in the portfolio ledger."""
+
     BUY = "buy"
     SELL = "sell"
     DIVIDEND = "dividend"
@@ -23,6 +30,8 @@ class TransactionType(str, Enum):
 
 @dataclass(frozen=True)
 class Transaction:
+    """@brief Immutable investment ledger entry imported from CSV or created through the API."""
+
     transaction_date: date
     ticker: str
     transaction_type: TransactionType
@@ -35,10 +44,12 @@ class Transaction:
 
     @property
     def gross_amount(self) -> Decimal:
+        """@brief Quantity times unit price rounded to money precision."""
         return quantize_money(self.quantity * self.price)
 
     @property
     def cash_impact(self) -> Decimal:
+        """@brief Signed cash movement implied by the transaction type."""
         if self.transaction_type == TransactionType.BUY:
             return quantize_money(-(self.gross_amount + self.fees))
         if self.transaction_type == TransactionType.SELL:
@@ -50,6 +61,8 @@ class Transaction:
 
 @dataclass(frozen=True)
 class Holding:
+    """@brief Open position after buy/sell transactions are netted."""
+
     ticker: str
     quantity: Decimal
     average_cost: Decimal
@@ -60,6 +73,8 @@ class Holding:
 
 @dataclass(frozen=True)
 class PricedHolding:
+    """@brief Holding enriched with current market value and allocation metrics."""
+
     ticker: str
     name: str | None
     quantity: Decimal
@@ -75,6 +90,8 @@ class PricedHolding:
 
 @dataclass(frozen=True)
 class PortfolioSummary:
+    """@brief Aggregate valuation for a portfolio and its visible holdings."""
+
     total_value: Decimal
     total_invested: Decimal
     total_gain: Decimal
@@ -85,6 +102,8 @@ class PortfolioSummary:
 
 @dataclass(frozen=True)
 class MarketSnapshot:
+    """@brief Latest quote plus optional previous close for percentage-change math."""
+
     symbol: str
     close: Decimal
     previous_close: Decimal | None
@@ -93,6 +112,7 @@ class MarketSnapshot:
 
     @property
     def change_percent(self) -> Decimal:
+        """@brief Percentage move from previous close to current close."""
         if self.previous_close is None or self.previous_close == 0:
             return Decimal("0")
         return quantize_money(((self.close - self.previous_close) / self.previous_close) * Decimal("100"))
@@ -100,6 +120,8 @@ class MarketSnapshot:
 
 @dataclass(frozen=True)
 class DcaRecommendation:
+    """@brief Enhanced DCA output consumed by the API and frontend."""
+
     base_amount: Decimal
     adjusted_amount: Decimal
     multiplier: Decimal

@@ -1,3 +1,7 @@
+"""@file
+@brief Enhanced DCA recommendation rules.
+"""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -12,6 +16,15 @@ def calculate_enhanced_dca(
     min_multiplier: Decimal | None = None,
     max_multiplier: Decimal | None = None,
 ) -> DcaRecommendation:
+    """@brief Adjust a base contribution amount from market drawdown/rally and volatility.
+
+    @param base_amount User's normal contribution amount.
+    @param market_change_percent Benchmark move over the selected period.
+    @param volatility_index Optional volatility signal, such as VIX.
+    @param min_multiplier Optional lower bound from saved DCA settings.
+    @param max_multiplier Optional upper bound from saved DCA settings.
+    @return A rounded DCA recommendation with multiplier and explanation.
+    """
     multiplier = Decimal("1.0")
     reason_parts = []
 

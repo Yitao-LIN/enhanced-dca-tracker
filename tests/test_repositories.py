@@ -1,3 +1,7 @@
+"""@file
+@brief Repository tests for persistence, duplicate detection, and scoped settings.
+"""
+
 import importlib.util
 import unittest
 from datetime import date, datetime

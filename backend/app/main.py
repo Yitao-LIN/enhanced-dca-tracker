@@ -1,3 +1,7 @@
+"""@file
+@brief FastAPI application, route handlers, and API payload adapters.
+"""
+
 from __future__ import annotations
 
 import json
@@ -109,11 +113,13 @@ app.add_middleware(
 
 
 def get_symbol_search_provider() -> YFinanceMarketDataProvider:
+    """@brief Dependency hook for ticker search so tests can inject a stub provider."""
     return YFinanceMarketDataProvider()
 
 
 @app.on_event("startup")
 def on_startup() -> None:
+    """@brief Run migrations and bootstrap reference data before serving API requests."""
     initialize_database()
     with SessionLocal() as db:
         bootstrap_reference_data(db)
@@ -185,6 +191,7 @@ async def upload_transactions(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
+    """@brief Import a CSV/ZIP upload, saving confirmed mappings before parsing rows."""
     try:
         content = await file.read()
         submitted_mappings = _parse_security_mappings_form(mappings)
@@ -221,6 +228,7 @@ async def preview_transactions(
     db: Session = Depends(get_db),
     search_provider: YFinanceMarketDataProvider = Depends(get_symbol_search_provider),
 ) -> dict[str, object]:
+    """@brief Preview a CSV/ZIP upload without writing transactions to the database."""
     content = await file.read()
     security_mappings = get_security_mapping_symbols(db, portfolio_id=portfolio_id)
     preview_rows = preview_transactions_csv(content, security_mappings=security_mappings)
@@ -239,6 +247,7 @@ async def preview_transactions(
     suggestion_cache: dict[str, tuple[list[dict[str, object]], str | None]] = {}
 
     for row in preview_rows:
+        # Preview keeps mapping rows editable even if live symbol search is offline.
         if row.security_label is not None:
             mapping_count += 1
             suggestions, search_error = _search_suggestions(row.security_label, suggestion_cache, search_provider)
@@ -298,6 +307,7 @@ def remove_transactions_for_ticker(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
+    """@brief Delete all imported transactions for one ticker so it can be re-imported cleanly."""
     return {"deleted": delete_transactions_for_ticker(db, ticker=ticker, portfolio_id=portfolio_id)}
 
 
@@ -359,6 +369,7 @@ def hide_tracking_security(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
+    """@brief Hide a ticker from portfolio tracking without removing its transactions."""
     try:
         record = upsert_hidden_security(db, ticker=payload.ticker, portfolio_id=portfolio_id)
     except ValueError as exc:
@@ -372,6 +383,7 @@ def restore_tracking_security(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
 ) -> dict[str, int]:
+    """@brief Restore a hidden ticker to portfolio tracking."""
     return {"deleted": int(delete_hidden_security(db, ticker=ticker, portfolio_id=portfolio_id))}
 
 
@@ -464,6 +476,7 @@ def backfill_market_price_history(
     payload: MarketHistoryBackfillRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
+    """@brief Fetch daily market history for requested symbols and store successful rows."""
     if payload.start_date > payload.end_date:
         raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date.")
     symbols = _backfill_symbols(payload)
@@ -473,6 +486,7 @@ def backfill_market_price_history(
     failures: list[dict[str, str]] = []
 
     for symbol in symbols:
+        # Symbol failures are reported per item so a single bad ticker does not block the batch.
         try:
             fetched = provider.historical_prices(
                 symbol=symbol,
@@ -527,6 +541,7 @@ def backfill_intraday_market_prices(
     payload: IntradayMarketBackfillRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
+    """@brief Fetch intraday market history for requested symbols and store successful rows."""
     start_at = _naive_utc(payload.start_at)
     end_at = _naive_utc(payload.end_at)
     if start_at > end_at:
@@ -539,6 +554,7 @@ def backfill_intraday_market_prices(
     failures: list[dict[str, str]] = []
 
     for symbol in symbols:
+        # Intraday provider availability varies by symbol and market hours; keep partial success.
         try:
             fetched = provider.intraday_prices(
                 symbol=symbol,
@@ -596,6 +612,7 @@ def get_portfolio(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
 ) -> object:
+    """@brief Return the current visible portfolio summary."""
     transactions = _visible_transactions(db, portfolio_id)
     return summarize_portfolio(transactions, get_market_prices(db))
 
@@ -607,6 +624,7 @@ def get_portfolio_history(
     end_date: date | None = None,
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
+    """@brief Return daily portfolio history with normalized benchmark series."""
     transactions = _visible_transactions(db, portfolio_id)
     if not transactions:
         return []
@@ -639,6 +657,7 @@ def get_portfolio_intraday_history(
     interval: str = "30m",
     db: Session = Depends(get_db),
 ) -> list[dict[str, object]]:
+    """@brief Return intraday portfolio history, falling back to daily prices when needed."""
     start_at = _naive_utc(start_at) if start_at is not None else None
     end_at = _naive_utc(end_at) if end_at is not None else None
     transactions = _visible_transactions(db, portfolio_id)
@@ -660,6 +679,7 @@ def get_portfolio_intraday_history(
     }
     fallback_timestamps = _intraday_fallback_timestamps(start_at, end_at, normalized_interval)
     if fallback_timestamps:
+        # Short chart ranges can still render after daily backfills even when intraday data is missing.
         for symbol, history in price_history.items():
             if not history:
                 history.update(_daily_history_fallback_map(db, symbol, fallback_timestamps))
@@ -706,6 +726,7 @@ def set_dca_settings(payload: DcaSettingsIn, db: Session = Depends(get_db)) -> d
 
 @app.post("/api/dca/recommendation", response_model=DcaRecommendationOut)
 def get_dca_recommendation(payload: DcaRequest, db: Session = Depends(get_db)) -> object:
+    """@brief Return an Enhanced DCA recommendation using payload or saved settings."""
     settings = load_dca_settings(db, portfolio_id=payload.portfolio_id)
     benchmark_symbol = (payload.benchmark_symbol or settings.preferred_benchmark).upper()
     market_change_percent = payload.market_change_percent
@@ -820,6 +841,7 @@ def _symbol_search_payload(result: object, query: str | None = None) -> dict[str
 
 
 def _parse_security_mappings_form(raw_mappings: str | None) -> list[SecurityMapping]:
+    """@brief Parse multipart import mapping JSON into repository value objects."""
     if not raw_mappings:
         return []
     try:
@@ -945,6 +967,7 @@ def _portfolio_intraday_history_payload(point: object) -> dict[str, object]:
 
 
 def _visible_transactions(db: Session, portfolio_id: str) -> list[Transaction]:
+    """@brief Load portfolio transactions after filtering hidden tracking symbols."""
     hidden_symbols = get_hidden_security_symbols(db, portfolio_id=portfolio_id)
     transactions = load_transactions(db, portfolio_id=portfolio_id)
     if not hidden_symbols:
@@ -961,6 +984,7 @@ def _intraday_history_map(records: list[object]) -> dict[datetime, Decimal]:
 
 
 def _intraday_fallback_timestamps(start_at: datetime | None, end_at: datetime | None, interval: str) -> list[datetime]:
+    """@brief Build bounded timestamps for daily-history fallback in short chart ranges."""
     if start_at is None or end_at is None or start_at > end_at:
         return []
     delta = _intraday_interval_delta(interval)

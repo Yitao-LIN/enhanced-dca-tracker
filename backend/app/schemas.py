@@ -1,3 +1,7 @@
+"""@file
+@brief Pydantic request and response schemas for FastAPI route contracts.
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -8,16 +12,22 @@ from pydantic import BaseModel, ConfigDict
 
 
 class ApiModel(BaseModel):
+    """@brief Base response model configured for ORM-compatible serialization."""
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class PortfolioIn(BaseModel):
+    """@brief Request payload for creating or updating a portfolio."""
+
     name: str
     slug: str | None = None
     base_currency: str = "EUR"
 
 
 class AccountIn(BaseModel):
+    """@brief Request payload for creating or resolving an account."""
+
     name: str
     portfolio_id: str = "default"
     institution: str | None = None
@@ -26,6 +36,8 @@ class AccountIn(BaseModel):
 
 
 class TransactionIn(BaseModel):
+    """@brief Request payload for manually adding a transaction."""
+
     portfolio_id: str = "default"
     transaction_date: date
     ticker: str
@@ -39,10 +51,14 @@ class TransactionIn(BaseModel):
 
 
 class PriceMap(BaseModel):
+    """@brief Request payload for bulk latest-price updates."""
+
     prices: dict[str, Decimal]
 
 
 class MarketPriceHistoryPointIn(BaseModel):
+    """@brief One daily market-history price point submitted to the API."""
+
     symbol: str
     price_date: date
     close: Decimal
@@ -56,10 +72,14 @@ class MarketPriceHistoryPointIn(BaseModel):
 
 
 class MarketPriceHistoryIn(BaseModel):
+    """@brief Bulk daily market-history update payload."""
+
     prices: list[MarketPriceHistoryPointIn]
 
 
 class MarketHistoryBackfillRequest(BaseModel):
+    """@brief Daily Yahoo Finance backfill request for one or more symbols."""
+
     symbol: str | None = None
     symbols: list[str] | None = None
     start_date: date
@@ -69,6 +89,8 @@ class MarketHistoryBackfillRequest(BaseModel):
 
 
 class IntradayMarketBackfillRequest(BaseModel):
+    """@brief Intraday Yahoo Finance backfill request for one or more symbols."""
+
     symbol: str | None = None
     symbols: list[str] | None = None
     start_at: datetime
@@ -79,6 +101,8 @@ class IntradayMarketBackfillRequest(BaseModel):
 
 
 class SecurityMappingIn(BaseModel):
+    """@brief Request payload for saving one Fortuneo label-to-ticker mapping."""
+
     security_label: str
     ticker: str
     provider: str = "manual"
@@ -89,6 +113,8 @@ class SecurityMappingIn(BaseModel):
 
 
 class SecurityMappingOut(ApiModel):
+    """@brief Response payload for a saved security mapping."""
+
     id: int
     portfolio_id: str
     security_label: str
@@ -104,10 +130,14 @@ class SecurityMappingOut(ApiModel):
 
 
 class HiddenSecurityIn(BaseModel):
+    """@brief Request payload for hiding one ticker from tracking views."""
+
     ticker: str
 
 
 class HiddenSecurityOut(ApiModel):
+    """@brief Response payload for a hidden ticker."""
+
     id: int
     portfolio_id: str
     ticker: str
@@ -115,12 +145,16 @@ class HiddenSecurityOut(ApiModel):
 
 
 class PortfolioHistoryRequest(BaseModel):
+    """@brief Shared portfolio-history request shape for documented clients."""
+
     portfolio_id: str = "default"
     start_date: date | None = None
     end_date: date | None = None
 
 
 class DcaSettingsIn(BaseModel):
+    """@brief Request payload for portfolio-specific DCA settings."""
+
     portfolio_id: str = "default"
     base_amount: Decimal = Decimal("1000")
     preferred_benchmark: str = "^GSPC"
@@ -130,6 +164,8 @@ class DcaSettingsIn(BaseModel):
 
 
 class DcaRequest(BaseModel):
+    """@brief Request payload for computing a DCA recommendation."""
+
     base_amount: Decimal | None = None
     market_change_percent: Decimal | None = None
     volatility_index: Decimal | None = None
@@ -140,10 +176,14 @@ class DcaRequest(BaseModel):
 
 
 class HealthOut(ApiModel):
+    """@brief Health-check response."""
+
     status: Literal["ok"]
 
 
 class PortfolioOut(ApiModel):
+    """@brief Portfolio response."""
+
     id: str
     name: str
     base_currency: str
@@ -151,6 +191,8 @@ class PortfolioOut(ApiModel):
 
 
 class AccountOut(ApiModel):
+    """@brief Account response."""
+
     id: int
     name: str
     institution: str | None = None
@@ -160,6 +202,8 @@ class AccountOut(ApiModel):
 
 
 class TransactionOut(ApiModel):
+    """@brief Transaction response."""
+
     transaction_date: date
     ticker: str
     transaction_type: str
@@ -172,11 +216,15 @@ class TransactionOut(ApiModel):
 
 
 class TransactionCreateOut(ApiModel):
+    """@brief Manual transaction creation result."""
+
     created: bool
     count: int
 
 
 class ImportSummaryOut(ApiModel):
+    """@brief CSV upload import summary."""
+
     import_session_id: int
     portfolio_id: str
     filename: str | None = None
@@ -188,6 +236,8 @@ class ImportSummaryOut(ApiModel):
 
 
 class SymbolSearchCandidateOut(ApiModel):
+    """@brief Candidate ticker returned by security-label search."""
+
     symbol: str
     name: str | None = None
     exchange: str | None = None
@@ -199,6 +249,8 @@ class SymbolSearchCandidateOut(ApiModel):
 
 
 class ImportPreviewRowOut(ApiModel):
+    """@brief One row in a CSV import preview, including status and mapping suggestions."""
+
     row_number: int
     status: Literal["new", "duplicate_in_file", "duplicate_existing", "invalid", "needs_mapping"]
     transaction_date: date | None = None
@@ -217,6 +269,8 @@ class ImportPreviewRowOut(ApiModel):
 
 
 class ImportPreviewOut(ApiModel):
+    """@brief Full CSV import preview response."""
+
     row_count: int
     valid_count: int
     duplicate_count: int
@@ -226,14 +280,20 @@ class ImportPreviewOut(ApiModel):
 
 
 class UpdatedCountOut(ApiModel):
+    """@brief Generic response for bulk update counts."""
+
     updated: int
 
 
 class DeletedCountOut(ApiModel):
+    """@brief Generic response for delete counts."""
+
     deleted: int
 
 
 class MarketQuoteOut(ApiModel):
+    """@brief Live quote response."""
+
     symbol: str
     close: Decimal
     previous_close: Decimal | None = None
@@ -243,6 +303,8 @@ class MarketQuoteOut(ApiModel):
 
 
 class MarketPriceHistoryPointOut(ApiModel):
+    """@brief Daily market-history response point."""
+
     symbol: str
     price_date: date
     close: Decimal
@@ -256,6 +318,8 @@ class MarketPriceHistoryPointOut(ApiModel):
 
 
 class MarketHistoryBackfillOut(ApiModel):
+    """@brief Daily market-history backfill result."""
+
     symbols: list[str]
     source: str
     updated: int
@@ -263,6 +327,8 @@ class MarketHistoryBackfillOut(ApiModel):
 
 
 class IntradayMarketBackfillOut(ApiModel):
+    """@brief Intraday market-history backfill result."""
+
     symbols: list[str]
     source: str
     interval: str
@@ -271,6 +337,8 @@ class IntradayMarketBackfillOut(ApiModel):
 
 
 class PricedHoldingOut(ApiModel):
+    """@brief Priced holding response embedded in portfolio summaries."""
+
     ticker: str
     name: str | None = None
     quantity: Decimal
@@ -285,6 +353,8 @@ class PricedHoldingOut(ApiModel):
 
 
 class PortfolioSummaryOut(ApiModel):
+    """@brief Portfolio summary response."""
+
     total_value: Decimal
     total_invested: Decimal
     total_gain: Decimal
@@ -294,6 +364,8 @@ class PortfolioSummaryOut(ApiModel):
 
 
 class PortfolioHistoryPointOut(ApiModel):
+    """@brief Daily portfolio-history response point."""
+
     date: date
     invested_amount: Decimal
     market_value: Decimal
@@ -303,6 +375,8 @@ class PortfolioHistoryPointOut(ApiModel):
 
 
 class PortfolioIntradayHistoryPointOut(ApiModel):
+    """@brief Intraday portfolio-history response point."""
+
     timestamp: datetime
     invested_amount: Decimal
     market_value: Decimal
@@ -312,6 +386,8 @@ class PortfolioIntradayHistoryPointOut(ApiModel):
 
 
 class DcaSettingsOut(ApiModel):
+    """@brief Persisted DCA settings response."""
+
     portfolio_id: str
     base_amount: Decimal
     preferred_benchmark: str
@@ -323,6 +399,8 @@ class DcaSettingsOut(ApiModel):
 
 
 class DcaRecommendationOut(ApiModel):
+    """@brief DCA recommendation response."""
+
     base_amount: Decimal
     adjusted_amount: Decimal
     multiplier: Decimal

@@ -1,3 +1,7 @@
+"""@file
+@brief Build intraday portfolio history points from transactions and intraday prices.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,6 +14,8 @@ from app.services.portfolio import build_holdings
 
 @dataclass(frozen=True)
 class PortfolioIntradayPoint:
+    """@brief Portfolio value and normalized benchmark values for one intraday timestamp."""
+
     timestamp: datetime
     invested_amount: Decimal
     market_value: Decimal
@@ -25,6 +31,7 @@ def build_portfolio_intraday_history(
     start_at: datetime | None = None,
     end_at: datetime | None = None,
 ) -> list[PortfolioIntradayPoint]:
+    """@brief Build timestamped portfolio performance history for intraday chart ranges."""
     if not transactions:
         return []
 
@@ -51,6 +58,7 @@ def build_portfolio_intraday_history(
         gain = quantize_money(market_value - invested_amount)
         gain_percent = Decimal("0") if invested_amount == 0 else quantize_money((gain / invested_amount) * Decimal("100"))
 
+        # Normalize each benchmark to the first visible portfolio value for chart comparability.
         if benchmark_base_value is None and market_value > 0:
             benchmark_base_value = market_value
             benchmark_base_prices = dict(last_benchmarks)
@@ -76,6 +84,7 @@ def _timeline_timestamps(
     start_at: datetime | None,
     end_at: datetime | None,
 ) -> list[datetime]:
+    """@brief Merge intraday price and benchmark timestamps within the effective range."""
     first_transaction_date = min((transaction.transaction_date for transaction in transactions), default=None)
     effective_start_at = start_at
     if first_transaction_date is not None:

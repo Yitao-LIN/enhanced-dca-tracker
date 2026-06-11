@@ -1,5 +1,7 @@
 """Add intraday market price history.
 
+@brief Add intraday market price history.
+
 Revision ID: 20260609_0006
 Revises: 20260607_0005
 Create Date: 2026-06-09 00:00:00.000000

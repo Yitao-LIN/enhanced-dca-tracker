@@ -1,3 +1,7 @@
+"""@file
+@brief Alembic environment configuration for online and offline migrations.
+"""
+
 from __future__ import annotations
 
 from logging.config import fileConfig
@@ -26,6 +30,7 @@ config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 
 def run_migrations_offline() -> None:
+    """@brief Run migrations without creating an Engine."""
     context.configure(
         url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
@@ -38,6 +43,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """@brief Run migrations with an Engine connection."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

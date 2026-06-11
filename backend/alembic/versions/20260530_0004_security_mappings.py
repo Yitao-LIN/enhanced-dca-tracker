@@ -1,5 +1,7 @@
 """Add security mappings.
 
+@brief Add Fortuneo security-label mappings.
+
 Revision ID: 20260530_0004
 Revises: 20260524_0003
 Create Date: 2026-05-30 00:00:00

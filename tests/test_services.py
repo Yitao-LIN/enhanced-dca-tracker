@@ -1,3 +1,7 @@
+"""@file
+@brief Service-layer tests for CSV parsing, portfolio math, market data, and DCA logic.
+"""
+
 import io
 import unittest
 import zipfile

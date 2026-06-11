@@ -4,7 +4,7 @@ A personalized investment tracker for an Enhanced Dollar Cost Averaging workflow
 
 - import historical Fortuneo transactions from CSV;
 - compute open holdings, average cost, allocation, and unrealized performance;
-- track market prices manually in the MVP, with a backend adapter for `yfinance`;
+- track market prices manually or through a backend adapter for `yfinance`;
 - compute the next investment amount from market performance and volatility;
 - grow toward a React + FastAPI + PostgreSQL application.
 
@@ -71,6 +71,8 @@ The frontend currently runs without a build step. It uses React from a CDN and i
 - portfolio metrics and holdings table;
 - portfolio/account selection from the API;
 - allocation visualization and backend portfolio history charting;
+- intraday portfolio ranges with daily-history fallback when intraday rows are unavailable;
+- hidden/security tracking controls and ticker-level transaction deletion for clean re-imports;
 - S&P 500 and Nasdaq 100 benchmark backfill controls;
 - Enhanced DCA recommendation controls.
 
@@ -144,25 +146,31 @@ GET    /api/accounts
 POST   /api/accounts
 GET    /api/transactions
 POST   /api/transactions
+DELETE /api/transactions/{ticker}
 POST   /api/transactions/preview
 POST   /api/transactions/upload
 GET    /api/security-mappings
 PUT    /api/security-mappings
 DELETE /api/security-mappings
+GET    /api/hidden-securities
+PUT    /api/hidden-securities
+DELETE /api/hidden-securities
 GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
 PUT    /api/market/history
 GET    /api/market/history/{ticker}
 POST   /api/market/history/backfill
+POST   /api/market/intraday/backfill
 GET    /api/portfolio
 GET    /api/portfolio/history
+GET    /api/portfolio/history/intraday
 GET    /api/dca/settings
 PUT    /api/dca/settings
 POST   /api/dca/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, latest market prices, historical market prices, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, hidden securities, latest market prices, daily market price history, intraday market price history, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
 
 ## Run Automated Tests
 
@@ -182,11 +190,13 @@ Covered behavior:
 - SQLite repository persistence when SQLAlchemy is installed.
 - duplicate-safe CSV import sessions.
 - S&P 500/Nasdaq 100 historical market price storage and range reads.
+- intraday market price storage and fallback portfolio history reads.
 - portfolio history and benchmark normalization.
 - persisted DCA settings.
 - persisted and editable per-portfolio Fortuneo security label mappings.
+- hidden security tracking and ticker-level transaction deletion/re-import.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
-- FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, market history, DCA settings, and validation errors.
+- FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, market history, intraday history, DCA settings, hidden securities, deletion, and validation errors.
 
 ## CSV Import Format
 

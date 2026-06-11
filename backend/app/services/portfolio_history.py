@@ -1,3 +1,7 @@
+"""@file
+@brief Build daily portfolio history points from transactions and stored prices.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,6 +14,8 @@ from app.services.portfolio import build_holdings
 
 @dataclass(frozen=True)
 class PortfolioHistoryPoint:
+    """@brief Portfolio value and normalized benchmark values for one date."""
+
     price_date: date
     invested_amount: Decimal
     market_value: Decimal
@@ -25,6 +31,7 @@ def build_portfolio_history(
     start_date: date | None = None,
     end_date: date | None = None,
 ) -> list[PortfolioHistoryPoint]:
+    """@brief Build daily portfolio performance history from transaction and price timelines."""
     if not transactions and not prices_by_symbol and not benchmarks_by_symbol:
         return []
 
@@ -51,6 +58,7 @@ def build_portfolio_history(
         gain = quantize_money(market_value - invested_amount)
         gain_percent = Decimal("0") if invested_amount == 0 else quantize_money((gain / invested_amount) * Decimal("100"))
 
+        # Benchmarks are normalized to the first non-zero portfolio value for visual comparison.
         if benchmark_base_value is None and market_value > 0:
             benchmark_base_value = market_value
             benchmark_base_prices = dict(last_benchmarks)
@@ -76,6 +84,7 @@ def _timeline_dates(
     start_date: date | None,
     end_date: date | None,
 ) -> list[date]:
+    """@brief Merge transaction, price, and benchmark dates within the effective range."""
     first_transaction_date = min((transaction.transaction_date for transaction in transactions), default=None)
     effective_start_date = start_date
     if first_transaction_date is not None:

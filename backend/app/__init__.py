@@ -1,1 +1,3 @@
-"""Investment tracker backend package."""
+"""@file
+@brief Investment tracker backend package marker.
+"""

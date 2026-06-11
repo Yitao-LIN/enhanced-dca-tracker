@@ -25,6 +25,8 @@ The golden CSV covers:
 - French decimal formatting;
 - optional account and description fields.
 
+The synthetic market history covers holding prices plus S&P 500 and Nasdaq 100 benchmark prices. Route tests also use it for hidden-security filtering and for intraday history fallback when intraday rows are missing.
+
 The synthetic bourse ZIP mirrors the private Fortuneo bourse export format: one ISO-8859-1 `HistoriqueOperationsBourse_...csv` member, real bourse headers, a trailing empty column, and a security label with no ticker column. It is safe mock data and should be used instead of real account exports for regression tests.
 
 Money values in expected JSON files are stored as strings to keep decimal precision exact.

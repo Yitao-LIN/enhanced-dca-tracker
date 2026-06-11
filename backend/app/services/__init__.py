@@ -1,1 +1,3 @@
-"""Business services for the investment tracker."""
+"""@file
+@brief Business-service package for parsing, valuation, market data, and DCA logic.
+"""

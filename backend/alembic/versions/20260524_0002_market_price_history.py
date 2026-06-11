@@ -1,5 +1,7 @@
 """Add market price history.
 
+@brief Add daily market price history.
+
 Revision ID: 20260524_0002
 Revises: 20260523_0001
 Create Date: 2026-05-24 00:00:00

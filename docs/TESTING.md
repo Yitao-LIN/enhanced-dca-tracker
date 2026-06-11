@@ -42,22 +42,34 @@ Purpose:
 - verify portfolio/account isolation;
 - verify duplicate-safe CSV imports.
 - verify historical market price upsert and range filtering.
+- verify intraday market price upsert, backfill, and fallback history behavior.
+- verify hidden security filtering and ticker-level transaction deletion/re-import.
 - verify DCA settings persistence.
 - verify portfolio history and benchmark normalization.
 - verify yfinance historical response normalization.
 - verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
-- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, market history, DCA settings, and validation errors.
+- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, market history, intraday history, DCA settings, hidden securities, and validation errors.
 
 Expected output:
 
 ```text
 test_dca_settings_and_recommendation_routes ... ok
+test_dca_settings_rejects_inverted_multiplier_bounds ... ok
+test_delete_ticker_transactions_allows_reimport ... ok
 test_empty_portfolio_summary_returns_zeroes ... ok
-test_health_and_reference_routes ... ok
 test_fortuneo_account_export_preview_and_upload_report_wrong_export_type ... ok
+test_health_and_reference_routes ... ok
+test_hidden_security_routes_filter_summary_without_deleting_transactions ... ok
+test_intraday_backfill_feeds_portfolio_history ... ok
+test_intraday_backfill_rejects_reversed_datetime_range ... ok
+test_intraday_history_rejects_invalid_interval ... ok
+test_intraday_history_uses_daily_fallback_when_intraday_rows_are_missing ... ok
 test_invalid_csv_preview_returns_row_errors_without_bad_request ... ok
 test_invalid_csv_upload_returns_bad_request ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
+test_market_history_backfill_rejects_reversed_date_range ... ok
+test_market_history_backfill_skips_failed_symbols ... ok
+test_portfolio_history_respects_range_and_hidden_securities ... ok
 test_portfolio_summary_matches_golden_fixture ... ok
 test_preview_golden_csv_matches_fixture_without_persisting ... ok
 test_preview_keeps_mapping_row_editable_when_search_fails ... ok
@@ -72,9 +84,13 @@ test_upload_transactions_skips_duplicates_and_lists_accounts ... ok
 test_duplicate_preview_fixture_marks_duplicate_rows ... ok
 test_golden_fixture_matches_expected_portfolio_history ... ok
 test_golden_fixture_matches_expected_summary ... ok
+test_backend_empty_history_does_not_render_demo_monthly_chart ... ok
+test_market_price_parser_keeps_dot_decimal_prices ... ok
 test_dca_settings_are_persisted_per_portfolio ... ok
+test_hidden_securities_are_persisted_per_portfolio ... ok
 test_import_allows_same_security_with_different_quantity ... ok
 test_import_skips_duplicate_transactions ... ok
+test_intraday_market_prices_upsert_and_filter_ranges ... ok
 test_keeps_portfolios_isolated ... ok
 test_market_price_history_upserts_and_filters_ranges ... ok
 test_persists_transactions_and_prices ... ok
@@ -86,17 +102,19 @@ test_parse_fortuneo_bourse_zip_with_enriched_security_code ... ok
 test_parse_fortuneo_style_csv ... ok
 test_parse_zip_without_fortuneo_csv_fails_clearly ... ok
 test_preview_fortuneo_bourse_without_security_code_reports_mapping_error ... ok
-test_preview_multi_row_fortuneo_bourse_zip_reports_mapping_rows ... ok
+test_preview_fortuneo_bourse_zip_reports_mapping_row ... ok
 test_enhanced_dca_applies_settings_multiplier_bounds ... ok
 test_enhanced_dca_increases_on_market_drawdown ... ok
 test_normalize_yfinance_history ... ok
 test_normalize_yfinance_search_quotes ... ok
 test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_build_portfolio_history_with_normalized_benchmarks ... ok
+test_build_portfolio_intraday_history_with_normalized_benchmarks ... ok
+test_portfolio_history_starts_at_first_transaction ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 44 tests
+Ran 60 tests
 
 OK
 ```
@@ -182,6 +200,11 @@ Expected output:
 INFO  [alembic.runtime.migration] Context impl SQLiteImpl.
 INFO  [alembic.runtime.migration] Will assume non-transactional DDL.
 INFO  [alembic.runtime.migration] Running upgrade  -> 20260523_0001, Initial schema.
+INFO  [alembic.runtime.migration] Running upgrade 20260523_0001 -> 20260524_0002, Add market price history.
+INFO  [alembic.runtime.migration] Running upgrade 20260524_0002 -> 20260524_0003, Add DCA settings.
+INFO  [alembic.runtime.migration] Running upgrade 20260524_0003 -> 20260530_0004, Add security mappings.
+INFO  [alembic.runtime.migration] Running upgrade 20260530_0004 -> 20260607_0005, Add hidden securities.
+INFO  [alembic.runtime.migration] Running upgrade 20260607_0005 -> 20260609_0006, Add intraday market price history.
 ```
 
 Then inspect the tables:
@@ -202,8 +225,10 @@ Expected output includes:
 accounts
 alembic_version
 dca_settings
+hidden_securities
 import_sessions
 market_price_history
+market_price_intraday
 market_prices
 portfolios
 security_mappings
@@ -373,6 +398,56 @@ Expected response contains two rows ordered by date:
 ]
 ```
 
+## Intraday Market Price Smoke Test
+
+Start the backend:
+
+```powershell
+cd "X:\My Finance\Tracker\backend"
+.\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload
+```
+
+From another terminal, backfill a short intraday range for one symbol:
+
+```powershell
+$payload = @{
+  symbols = @("CW8.PA")
+  start_at = "2026-06-09T09:00:00"
+  end_at = "2026-06-09T10:00:00"
+  interval = "30m"
+  currency = "EUR"
+  source = "yfinance"
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://127.0.0.1:8000/api/market/intraday/backfill" `
+  -ContentType "application/json" `
+  -Body $payload
+```
+
+Purpose:
+
+- verify the API accepts intraday ranges and intervals such as `30m` or `1h`;
+- verify intraday provider rows are persisted in `market_price_intraday`;
+- verify latest prices are refreshed from the latest intraday point;
+- verify failures are reported per symbol instead of failing the whole request.
+
+Expected write response shape:
+
+```json
+{
+  "symbols": ["CW8.PA"],
+  "source": "yfinance",
+  "interval": "30m",
+  "updated": 2,
+  "failures": []
+}
+```
+
+The exact `updated` count depends on provider availability and market hours. If a symbol has no intraday data, the response should include that symbol in `failures`.
+
 ## Frontend Backend Connection Smoke Test
 
 Start the backend:
@@ -401,7 +476,9 @@ Purpose:
 - verify the browser can load the standalone frontend;
 - verify CORS allows the frontend to talk to the backend;
 - verify the page can connect to `/api/health`, `/api/portfolios`, `/api/accounts`, and `/api/portfolio`;
-- verify CSV/ZIP preview, security-label mapping, and confirmed upload use the backend when connected.
+- verify CSV/ZIP preview, security-label mapping, and confirmed upload use the backend when connected;
+- verify chart range switching calls daily or intraday history endpoints as appropriate;
+- verify hide/restore and delete/re-import controls use the backend when connected.
 
 Expected page behavior:
 
@@ -465,6 +542,22 @@ Run historical market price smoke tests after changing:
 - `/api/market/history` endpoints;
 - migrations that touch market price history.
 
+Run intraday market price smoke tests after changing:
+
+- `IntradayMarketPriceRecord`;
+- intraday market history repository functions;
+- `/api/market/intraday/backfill`;
+- `/api/portfolio/history/intraday`;
+- intraday fallback logic from daily history.
+
+Run hidden-security and ticker deletion smoke checks after changing:
+
+- `HiddenSecurityRecord`;
+- hidden-security repository functions;
+- `/api/hidden-securities` endpoints;
+- `/api/transactions/{ticker}` deletion;
+- portfolio summary/history filtering.
+
 Run frontend backend connection smoke tests after changing:
 
 - `frontend/index.html`;
@@ -482,7 +575,7 @@ tests/fixtures/
 Purpose:
 
 - provide stable Fortuneo-style CSV data without using private real transactions;
-- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, unsupported bank-account exports, unmapped security-label preview errors, cleaned-query search retries, saved mapping management, and mapping-assisted imports;
+- cover buys, sells, fees, dividends, two accounts, French number formatting, duplicate rows, historical holding prices, benchmark prices, Fortuneo ZIP parsing, real bourse headers, unsupported bank-account exports, unmapped security-label preview errors, cleaned-query search retries, saved mapping management, mapping-assisted imports, hidden-security filtering, ticker deletion, and intraday fallback behavior;
 - give API response schema, route, and import-preview tests exact expected outputs.
 
 Key files:
@@ -517,7 +610,7 @@ Purpose:
 - call FastAPI endpoints through `TestClient` instead of calling services directly;
 - use an isolated in-memory SQLite database by overriding the `get_db` dependency;
 - verify response-model serialization for `Decimal`, `date`, and `datetime` fields;
-- exercise the golden CSV preview/upload, mapping-assisted Fortuneo upload, duplicate-safe re-upload, account listing, price updates, portfolio summary, market history, portfolio history, DCA settings, DCA recommendation, and invalid CSV error paths.
+- exercise the golden CSV preview/upload, mapping-assisted Fortuneo upload, duplicate-safe re-upload, account listing, price updates, hidden securities, ticker deletion/re-import, portfolio summary, daily and intraday market history, portfolio history, DCA settings, DCA recommendation, and validation error paths.
 
 Run these after changing:
 
@@ -531,9 +624,11 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 38 tests, OK
+Automated tests: 60 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works
+Intraday market prices: backfill, range filtering, and daily fallback work
+Hidden securities: filter summaries/history without deleting transactions
 Frontend: demo fallback works, backend-connected mode works when FastAPI is running
 ```

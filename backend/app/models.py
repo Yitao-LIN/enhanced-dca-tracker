@@ -1,3 +1,7 @@
+"""@file
+@brief SQLAlchemy ORM table definitions for the tracker database.
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -10,6 +14,8 @@ from app.database import Base
 
 
 class PortfolioRecord(Base):
+    """@brief Persisted portfolio namespace such as the default or long-term portfolio."""
+
     __tablename__ = "portfolios"
     __table_args__ = (UniqueConstraint("slug", name="uq_portfolios_slug"),)
 
@@ -21,6 +27,8 @@ class PortfolioRecord(Base):
 
 
 class AccountRecord(Base):
+    """@brief Brokerage/account container scoped to one portfolio."""
+
     __tablename__ = "accounts"
     __table_args__ = (UniqueConstraint("portfolio_record_id", "name", name="uq_accounts_portfolio_name"),)
 
@@ -34,6 +42,8 @@ class AccountRecord(Base):
 
 
 class TransactionRecord(Base):
+    """@brief Persisted investment transaction imported from CSV or submitted through the API."""
+
     __tablename__ = "transactions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -51,6 +61,8 @@ class TransactionRecord(Base):
 
 
 class TransactionFingerprintRecord(Base):
+    """@brief Stable duplicate-detection hash for an imported transaction."""
+
     __tablename__ = "transaction_fingerprints"
     __table_args__ = (UniqueConstraint("portfolio_id", "fingerprint", name="uq_transaction_fingerprint"),)
 
@@ -62,6 +74,8 @@ class TransactionFingerprintRecord(Base):
 
 
 class ImportSessionRecord(Base):
+    """@brief Audit row summarizing one CSV upload attempt."""
+
     __tablename__ = "import_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -76,6 +90,8 @@ class ImportSessionRecord(Base):
 
 
 class SecurityMappingRecord(Base):
+    """@brief Saved Fortuneo security-label to ticker mapping scoped to one portfolio."""
+
     __tablename__ = "security_mappings"
     __table_args__ = (
         UniqueConstraint("portfolio_record_id", "normalized_label", name="uq_security_mappings_portfolio_label"),
@@ -100,6 +116,8 @@ class SecurityMappingRecord(Base):
 
 
 class HiddenSecurityRecord(Base):
+    """@brief Ticker hidden from tracking views without deleting its transactions."""
+
     __tablename__ = "hidden_securities"
     __table_args__ = (UniqueConstraint("portfolio_record_id", "ticker", name="uq_hidden_securities_portfolio_ticker"),)
 
@@ -110,6 +128,8 @@ class HiddenSecurityRecord(Base):
 
 
 class MarketPriceRecord(Base):
+    """@brief Latest known market price for one symbol."""
+
     __tablename__ = "market_prices"
     __table_args__ = (UniqueConstraint("symbol", name="uq_market_prices_symbol"),)
 
@@ -123,6 +143,8 @@ class MarketPriceRecord(Base):
 
 
 class MarketPriceHistoryRecord(Base):
+    """@brief Daily historical market price for one symbol, date, and source."""
+
     __tablename__ = "market_price_history"
     __table_args__ = (UniqueConstraint("symbol", "price_date", "source", name="uq_market_price_history_symbol_date_source"),)
 
@@ -141,6 +163,8 @@ class MarketPriceHistoryRecord(Base):
 
 
 class IntradayMarketPriceRecord(Base):
+    """@brief Intraday historical market price for one symbol, timestamp, interval, and source."""
+
     __tablename__ = "market_price_intraday"
     __table_args__ = (
         UniqueConstraint("symbol", "price_at", "interval", "source", name="uq_market_price_intraday_symbol_at_interval_source"),
@@ -162,6 +186,8 @@ class IntradayMarketPriceRecord(Base):
 
 
 class DcaSettingsRecord(Base):
+    """@brief Portfolio-specific Enhanced DCA preferences and multiplier bounds."""
+
     __tablename__ = "dca_settings"
     __table_args__ = (UniqueConstraint("portfolio_record_id", name="uq_dca_settings_portfolio"),)
 

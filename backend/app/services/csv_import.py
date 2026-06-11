@@ -1,3 +1,7 @@
+"""@file
+@brief Fortuneo-style CSV and ZIP import parsing plus row-level preview support.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -91,6 +95,8 @@ FORTUNEO_ARCHIVE_CSV_RE = re.compile(r"(^|/)HistoriqueOperations.*\.csv$", re.IG
 
 
 class SemicolonDialect(csv.excel):
+    """@brief CSV dialect used by most French broker exports."""
+
     delimiter = ";"
 
 TYPE_ALIASES = {
@@ -104,6 +110,8 @@ TYPE_ALIASES = {
 
 @dataclass(frozen=True)
 class CsvPreviewRow:
+    """@brief Parsed preview result for one source CSV row."""
+
     row_number: int
     transaction: Transaction | None = None
     error: str | None = None
@@ -111,6 +119,8 @@ class CsvPreviewRow:
 
 
 class SecurityMappingRequired(ValueError):
+    """@brief Raised when a row has only a security label and needs a saved ticker mapping."""
+
     def __init__(self, row_number: int, security_label: str) -> None:
         self.row_number = row_number
         self.security_label = security_label
@@ -121,6 +131,12 @@ def parse_transactions_csv(
     raw_csv: str | bytes,
     security_mappings: Mapping[str, str] | None = None,
 ) -> list[Transaction]:
+    """@brief Parse a CSV or Fortuneo ZIP export into domain transactions.
+
+    @param raw_csv CSV text, CSV bytes, or ZIP bytes containing a Fortuneo history CSV.
+    @param security_mappings Optional normalized label-to-ticker mapping for bourse rows.
+    @return Parsed transactions in source-file order.
+    """
     text = _extract_csv_text(raw_csv)
     dialect = _sniff_dialect(text)
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
@@ -140,6 +156,7 @@ def preview_transactions_csv(
     raw_csv: str | bytes,
     security_mappings: Mapping[str, str] | None = None,
 ) -> list[CsvPreviewRow]:
+    """@brief Parse import rows without failing the whole preview on row-level errors."""
     try:
         text = _extract_csv_text(raw_csv)
     except ValueError as exc:
@@ -173,6 +190,7 @@ def preview_transactions_csv(
 
 
 def _extract_csv_text(raw_csv: str | bytes) -> str:
+    """@brief Decode plain CSV bytes or extract the expected CSV member from a Fortuneo ZIP."""
     if isinstance(raw_csv, str):
         return raw_csv
     if _is_zip_archive(raw_csv):
@@ -215,6 +233,7 @@ def _sniff_dialect(text: str) -> csv.Dialect:
 
 
 def _map_headers(fieldnames: Iterable[str]) -> dict[str, str]:
+    """@brief Map localized/export-specific headers onto canonical parser fields."""
     normalized = {_normalize_header(name): name for name in fieldnames if name is not None}
     if _is_fortuneo_account_export(normalized):
         raise ValueError(
@@ -249,6 +268,7 @@ def _parse_row(
     row_number: int,
     security_mappings: Mapping[str, str] | None = None,
 ) -> Transaction:
+    """@brief Convert one normalized CSV row into a domain transaction."""
     transaction_type = _parse_transaction_type(_value(row, header_map, "type"), row_number)
     ticker = _parse_ticker(row, header_map, row_number, security_mappings)
     quantity = _parse_decimal(_value(row, header_map, "quantity"), default=Decimal("0"))
@@ -256,6 +276,7 @@ def _parse_row(
     amount = _parse_decimal(_value(row, header_map, "amount"), default=None)
     fees = abs(_parse_decimal(_value(row, header_map, "fees"), default=Decimal("0")))
 
+    # Fortuneo sometimes gives only amount/price or amount/quantity; infer the missing leg.
     if quantity == 0 and amount is not None and price != 0:
         quantity = abs(amount / price)
     if price == 0 and amount is not None and quantity != 0:
@@ -291,6 +312,7 @@ def _parse_ticker(
     row_number: int,
     security_mappings: Mapping[str, str] | None = None,
 ) -> str:
+    """@brief Resolve a row ticker directly or through a saved security-label mapping."""
     ticker = _value(row, header_map, "ticker").strip()
     if ticker:
         return ticker.upper()

@@ -1,3 +1,7 @@
+"""@file
+@brief FastAPI route tests using isolated in-memory SQLite databases.
+"""
+
 import io
 import json
 import unittest
@@ -380,6 +384,19 @@ class ApiRouteTests(unittest.TestCase):
         self.assertDecimalEqual(summary.json()["total_gain"], "20.00")
         self.assertDecimalEqual(summary.json()["total_gain_percent"], "11.11")
 
+    def test_market_history_backfill_rejects_reversed_date_range(self):
+        response = self.client.post(
+            "/api/market/history/backfill",
+            json={
+                "symbols": ["CW8.PA"],
+                "start_date": "2026-06-07",
+                "end_date": "2026-06-01",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("start_date must be before or equal to end_date", response.json()["detail"])
+
     def test_intraday_backfill_feeds_portfolio_history(self):
         with patch("app.main.YFinanceMarketDataProvider", return_value=StubHistoryProvider()):
             response = self.client.post(
@@ -425,6 +442,20 @@ class ApiRouteTests(unittest.TestCase):
         )
         self.assertDecimalEqual(history.json()[0]["market_value"], "200.00")
         self.assertDecimalEqual(history.json()[1]["market_value"], "210.00")
+
+    def test_intraday_backfill_rejects_reversed_datetime_range(self):
+        response = self.client.post(
+            "/api/market/intraday/backfill",
+            json={
+                "symbols": ["CW8.PA"],
+                "start_at": "2026-06-09T10:00:00",
+                "end_at": "2026-06-09T09:00:00",
+                "interval": "30m",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("start_at must be before or equal to end_at", response.json()["detail"])
 
     def test_intraday_history_uses_daily_fallback_when_intraday_rows_are_missing(self):
         created = self.client.post(
@@ -476,6 +507,29 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual({point["market_value"] for point in history.json()}, {"210.00"})
         self.assertEqual({point["benchmarks"]["^GSPC"] for point in history.json()}, {"210.00"})
 
+    def test_intraday_history_rejects_invalid_interval(self):
+        created = self.client.post(
+            "/api/transactions",
+            json={
+                "transaction_date": "2026-06-09",
+                "ticker": "CW8.PA",
+                "transaction_type": "buy",
+                "quantity": "2",
+                "price": "90",
+                "fees": "0",
+                "currency": "EUR",
+            },
+        )
+        self.assertEqual(created.status_code, 200)
+
+        history = self.client.get(
+            "/api/portfolio/history/intraday"
+            "?portfolio_id=default&start_at=2026-06-09T09:00:00&end_at=2026-06-09T10:00:00&interval=bad"
+        )
+
+        self.assertEqual(history.status_code, 400)
+        self.assertIn("interval must use minutes or hours", history.json()["detail"])
+
     def test_dca_settings_and_recommendation_routes(self):
         settings_payload = {
             "portfolio_id": "default",
@@ -507,6 +561,22 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(recommendation.json()["base_amount"], "750.00")
         self.assertEqual(recommendation.json()["adjusted_amount"], "975.00")
         self.assertEqual(recommendation.json()["multiplier"], "1.3")
+
+    def test_dca_settings_rejects_inverted_multiplier_bounds(self):
+        response = self.client.put(
+            "/api/dca/settings",
+            json={
+                "portfolio_id": "default",
+                "base_amount": "750",
+                "preferred_benchmark": "^GSPC",
+                "min_multiplier": "1.5",
+                "max_multiplier": "0.7",
+                "contribution_frequency": "monthly",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("min_multiplier must be less than or equal to max_multiplier", response.json()["detail"])
 
     def test_invalid_csv_upload_returns_bad_request(self):
         response = self.client.post(

@@ -1,3 +1,7 @@
+"""@file
+@brief Persistence adapters that translate between ORM rows and domain objects.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,6 +39,8 @@ DEFAULT_DCA_BENCHMARK = "^GSPC"
 
 @dataclass(frozen=True)
 class ImportSummary:
+    """@brief Result of a duplicate-aware CSV import session."""
+
     import_session_id: int
     portfolio_id: str
     filename: str | None
@@ -47,6 +53,8 @@ class ImportSummary:
 
 @dataclass(frozen=True)
 class MarketPriceHistoryPoint:
+    """@brief Repository input for one daily market-history price point."""
+
     symbol: str
     price_date: date
     close: Decimal
@@ -61,6 +69,8 @@ class MarketPriceHistoryPoint:
 
 @dataclass(frozen=True)
 class IntradayMarketPricePoint:
+    """@brief Repository input for one intraday market-history price point."""
+
     symbol: str
     price_at: datetime
     interval: str
@@ -76,6 +86,8 @@ class IntradayMarketPricePoint:
 
 @dataclass(frozen=True)
 class DcaSettings:
+    """@brief Domain-like value object for persisted DCA settings."""
+
     portfolio_id: str = DEFAULT_PORTFOLIO_ID
     base_amount: Decimal = DEFAULT_DCA_BASE_AMOUNT
     preferred_benchmark: str = DEFAULT_DCA_BENCHMARK
@@ -86,6 +98,8 @@ class DcaSettings:
 
 @dataclass(frozen=True)
 class SecurityMapping:
+    """@brief Value object for a Fortuneo security-label to ticker mapping."""
+
     security_label: str
     ticker: str
     provider: str = "manual"
@@ -101,6 +115,7 @@ def ensure_portfolio(
     name: str | None = None,
     base_currency: str = "EUR",
 ) -> PortfolioRecord:
+    """@brief Return an existing portfolio or create it with defaults."""
     slug = _normalize_slug(portfolio_id)
     record = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
     if record is None:
@@ -117,6 +132,7 @@ def create_portfolio(
     slug: str | None = None,
     base_currency: str = "EUR",
 ) -> PortfolioRecord:
+    """@brief Create or update a portfolio by normalized slug."""
     normalized_slug = _normalize_slug(slug or name)
     record = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == normalized_slug))
     if record is None:
@@ -144,6 +160,7 @@ def ensure_account(
     account_type: str | None = None,
     currency: str = "EUR",
 ) -> AccountRecord | None:
+    """@brief Return an existing account or create it inside the selected portfolio."""
     normalized_name = _normalize_optional_text(name)
     if normalized_name is None:
         return None
@@ -188,6 +205,7 @@ def list_accounts(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> list
 
 
 def get_security_mapping_symbols(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> dict[str, str]:
+    """@brief Return normalized security-label to ticker mappings for CSV parsing."""
     return {
         record.normalized_label: record.ticker
         for record in list_security_mappings(db, portfolio_id=portfolio_id)
@@ -237,6 +255,7 @@ def upsert_security_mapping(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     commit: bool = True,
 ) -> SecurityMappingRecord:
+    """@brief Save one security-label mapping, preserving provider metadata when supplied."""
     portfolio = ensure_portfolio(db, portfolio_id)
     display_label = mapping.security_label.strip()
     normalized_label = normalize_security_label(display_label)
@@ -281,6 +300,7 @@ def upsert_security_mappings(
     mappings: list[SecurityMapping],
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
 ) -> list[SecurityMappingRecord]:
+    """@brief Save unique security-label mappings in one transaction."""
     unique_mappings: dict[str, SecurityMapping] = {}
     for mapping in mappings:
         normalized_label = normalize_security_label(mapping.security_label)
@@ -311,10 +331,12 @@ def list_hidden_securities(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID
 
 
 def get_hidden_security_symbols(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> set[str]:
+    """@brief Return hidden ticker symbols for a portfolio."""
     return {record.ticker for record in list_hidden_securities(db, portfolio_id=portfolio_id)}
 
 
 def upsert_hidden_security(db: Session, ticker: str, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> HiddenSecurityRecord:
+    """@brief Hide one ticker from tracking views without deleting transactions."""
     portfolio = ensure_portfolio(db, portfolio_id)
     normalized_ticker = ticker.strip().upper()
     if not normalized_ticker:
@@ -335,6 +357,7 @@ def upsert_hidden_security(db: Session, ticker: str, portfolio_id: str = DEFAULT
 
 
 def delete_hidden_security(db: Session, ticker: str, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> bool:
+    """@brief Restore one ticker to tracking views."""
     slug = _normalize_slug(portfolio_id)
     portfolio = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
     if portfolio is None:
@@ -359,6 +382,7 @@ def delete_hidden_security(db: Session, ticker: str, portfolio_id: str = DEFAULT
 
 
 def bootstrap_reference_data(db: Session) -> None:
+    """@brief Ensure default rows and fingerprints exist for older local databases."""
     ensure_portfolio(db)
     statement = select(
         distinct(TransactionRecord.portfolio_id),
@@ -390,6 +414,7 @@ def bootstrap_reference_data(db: Session) -> None:
 
 
 def get_dca_settings(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> DcaSettingsRecord:
+    """@brief Load DCA settings or create defaults for the selected portfolio."""
     portfolio = ensure_portfolio(db, portfolio_id)
     record = db.scalar(select(DcaSettingsRecord).where(DcaSettingsRecord.portfolio_record_id == portfolio.id))
     if record is None:
@@ -408,6 +433,7 @@ def get_dca_settings(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> D
 
 
 def upsert_dca_settings(db: Session, settings: DcaSettings) -> DcaSettingsRecord:
+    """@brief Save portfolio-specific DCA settings."""
     portfolio = ensure_portfolio(db, settings.portfolio_id)
     record = db.scalar(select(DcaSettingsRecord).where(DcaSettingsRecord.portfolio_record_id == portfolio.id))
     if record is None:
@@ -425,6 +451,7 @@ def upsert_dca_settings(db: Session, settings: DcaSettings) -> DcaSettingsRecord
 
 
 def add_transaction(db: Session, transaction: Transaction, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> TransactionRecord:
+    """@brief Add one transaction unless its fingerprint already exists in the portfolio."""
     portfolio = ensure_portfolio(db, portfolio_id)
     ensure_account(db, name=transaction.account, portfolio_id=portfolio.slug, currency=transaction.currency)
     fingerprint = transaction_fingerprint(transaction)
@@ -480,6 +507,7 @@ def import_transactions(
     file_content: bytes | str | None = None,
     source: str = "csv",
 ) -> ImportSummary:
+    """@brief Persist a batch of transactions while skipping duplicates and recording the import."""
     portfolio = ensure_portfolio(db, portfolio_id)
     for transaction in transactions:
         ensure_account(db, name=transaction.account, portfolio_id=portfolio.slug, currency=transaction.currency)
@@ -491,6 +519,7 @@ def import_transactions(
     seen_in_import: set[str] = set()
 
     for transaction, fingerprint in zip(transactions, fingerprints):
+        # Fingerprints protect both against old database rows and repeated rows in the same file.
         if fingerprint in existing_fingerprints or fingerprint in seen_in_import:
             duplicate_count += 1
             continue
@@ -555,6 +584,7 @@ def list_transactions(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> 
 
 
 def delete_transactions_for_ticker(db: Session, ticker: str, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> int:
+    """@brief Delete all transactions and import fingerprints for one ticker."""
     slug = _normalize_slug(portfolio_id)
     normalized_ticker = ticker.strip().upper()
     if not normalized_ticker:
@@ -602,6 +632,7 @@ def upsert_market_price(
     as_of: datetime | None = None,
     write_history: bool = True,
 ) -> MarketPriceRecord:
+    """@brief Save the latest market price and optionally mirror it into daily history."""
     normalized_symbol = symbol.upper()
     record = db.scalar(select(MarketPriceRecord).where(MarketPriceRecord.symbol == normalized_symbol))
     if record is None:
@@ -640,6 +671,7 @@ def upsert_market_price_history(
     point: MarketPriceHistoryPoint,
     commit: bool = True,
 ) -> MarketPriceHistoryRecord:
+    """@brief Upsert one daily market-history row by symbol, date, and source."""
     normalized_symbol = point.symbol.upper()
     normalized_source = point.source.lower()
     statement = select(MarketPriceHistoryRecord).where(
@@ -672,6 +704,7 @@ def upsert_market_price_history(
 
 
 def upsert_market_price_history_many(db: Session, points: list[MarketPriceHistoryPoint]) -> int:
+    """@brief Upsert multiple daily market-history points in one commit."""
     for point in points:
         upsert_market_price_history(db, point, commit=False)
     db.commit()
@@ -685,6 +718,7 @@ def list_market_price_history(
     end_date: date | None = None,
     source: str | None = None,
 ) -> list[MarketPriceHistoryRecord]:
+    """@brief List daily market-history rows filtered by symbol, date range, and source."""
     statement = select(MarketPriceHistoryRecord).where(MarketPriceHistoryRecord.symbol == symbol.upper())
     if start_date is not None:
         statement = statement.where(MarketPriceHistoryRecord.price_date >= start_date)
@@ -701,6 +735,7 @@ def upsert_intraday_market_price(
     point: IntradayMarketPricePoint,
     commit: bool = True,
 ) -> IntradayMarketPriceRecord:
+    """@brief Upsert one intraday market-history row by symbol, timestamp, interval, and source."""
     normalized_symbol = point.symbol.upper()
     normalized_source = point.source.lower()
     normalized_interval = point.interval.lower()
@@ -736,6 +771,7 @@ def upsert_intraday_market_price(
 
 
 def upsert_intraday_market_prices_many(db: Session, points: list[IntradayMarketPricePoint]) -> int:
+    """@brief Upsert multiple intraday market-history points in one commit."""
     for point in points:
         upsert_intraday_market_price(db, point, commit=False)
     db.commit()
@@ -750,6 +786,7 @@ def list_intraday_market_prices(
     interval: str | None = None,
     source: str | None = None,
 ) -> list[IntradayMarketPriceRecord]:
+    """@brief List intraday market-history rows filtered by symbol, timestamp range, interval, and source."""
     statement = select(IntradayMarketPriceRecord).where(IntradayMarketPriceRecord.symbol == symbol.upper())
     if start_at is not None:
         statement = statement.where(IntradayMarketPriceRecord.price_at >= start_at)
@@ -788,6 +825,7 @@ def _transaction_from_record(record: TransactionRecord) -> Transaction:
 
 
 def transaction_fingerprint(transaction: Transaction) -> str:
+    """@brief Build the stable SHA-256 duplicate key for a transaction."""
     parts = [
         transaction.transaction_date.isoformat(),
         transaction.ticker.strip().upper(),

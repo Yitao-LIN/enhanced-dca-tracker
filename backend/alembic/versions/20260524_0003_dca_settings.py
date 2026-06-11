@@ -1,5 +1,7 @@
 """Add DCA settings.
 
+@brief Add portfolio-specific DCA settings.
+
 Revision ID: 20260524_0003
 Revises: 20260524_0002
 Create Date: 2026-05-24 00:00:00

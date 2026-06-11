@@ -1,3 +1,7 @@
+"""@file
+@brief Static regression tests for the standalone frontend source.
+"""
+
 import unittest
 from pathlib import Path
 

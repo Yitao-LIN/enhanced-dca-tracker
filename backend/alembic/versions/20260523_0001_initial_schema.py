@@ -1,5 +1,7 @@
 """Initial schema.
 
+@brief Initial schema migration.
+
 Revision ID: 20260523_0001
 Revises:
 Create Date: 2026-05-23 00:00:00
