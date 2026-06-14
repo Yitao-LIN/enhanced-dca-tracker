@@ -144,6 +144,24 @@ class HiddenSecurityOut(ApiModel):
     created_at: datetime
 
 
+class AllocationTargetIn(BaseModel):
+    """@brief Request payload for one target allocation percentage."""
+
+    ticker: str
+    target_percent: Decimal
+
+
+class AllocationTargetOut(ApiModel):
+    """@brief Persisted allocation target response."""
+
+    id: int
+    portfolio_id: str
+    ticker: str
+    target_percent: Decimal
+    created_at: datetime
+    updated_at: datetime
+
+
 class PortfolioHistoryRequest(BaseModel):
     """@brief Shared portfolio-history request shape for documented clients."""
 
@@ -383,6 +401,60 @@ class PortfolioIntradayHistoryPointOut(ApiModel):
     gain: Decimal
     gain_percent: Decimal
     benchmarks: dict[str, Decimal]
+
+
+class AllocationDriftOut(ApiModel):
+    """@brief Current allocation compared with an optional target."""
+
+    ticker: str
+    name: str | None = None
+    current_value: Decimal
+    current_percent: Decimal
+    target_percent: Decimal | None = None
+    target_value: Decimal | None = None
+    drift_percent: Decimal | None = None
+    drift_value: Decimal | None = None
+    buy_value: Decimal
+    trim_value: Decimal
+    action: str
+
+
+class MonthlyActivityOut(ApiModel):
+    """@brief Contribution and cash-flow activity for one calendar month."""
+
+    month: str
+    buy_contributions: Decimal
+    sell_proceeds: Decimal
+    dividends: Decimal
+    fees: Decimal
+    net_cash_flow: Decimal
+
+
+class BenchmarkComparisonOut(ApiModel):
+    """@brief Portfolio return compared with one normalized benchmark series."""
+
+    symbol: str
+    name: str
+    start_date: date
+    end_date: date
+    portfolio_start_value: Decimal
+    portfolio_end_value: Decimal
+    portfolio_return_percent: Decimal
+    benchmark_start_value: Decimal
+    benchmark_end_value: Decimal
+    benchmark_return_percent: Decimal
+    relative_return_percent: Decimal
+
+
+class PortfolioAnalyticsOut(ApiModel):
+    """@brief Rich portfolio analytics response."""
+
+    total_value: Decimal
+    total_target_percent: Decimal
+    unassigned_target_percent: Decimal
+    allocation_drift: list[AllocationDriftOut]
+    monthly_activity: list[MonthlyActivityOut]
+    benchmark_comparison: list[BenchmarkComparisonOut]
 
 
 class DcaSettingsOut(ApiModel):

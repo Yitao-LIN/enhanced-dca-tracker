@@ -44,15 +44,18 @@ Purpose:
 - verify historical market price upsert and range filtering.
 - verify intraday market price upsert, backfill, and fallback history behavior.
 - verify hidden security filtering and ticker-level transaction deletion/re-import.
+- verify allocation target persistence and portfolio analytics.
 - verify DCA settings persistence.
 - verify portfolio history and benchmark normalization.
 - verify yfinance historical response normalization.
 - verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
-- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, market history, intraday history, DCA settings, hidden securities, and validation errors.
+- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, portfolio analytics, allocation targets, market history, intraday history, DCA settings, hidden securities, and validation errors.
+- verify the standalone frontend calls analytics endpoints and does not render demo analytics as backend data.
 
 Expected output:
 
 ```text
+test_allocation_target_routes_replace_and_validate_payloads ... ok
 test_dca_settings_and_recommendation_routes ... ok
 test_dca_settings_rejects_inverted_multiplier_bounds ... ok
 test_delete_ticker_transactions_allows_reimport ... ok
@@ -69,6 +72,7 @@ test_invalid_csv_upload_returns_bad_request ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
 test_market_history_backfill_rejects_reversed_date_range ... ok
 test_market_history_backfill_skips_failed_symbols ... ok
+test_portfolio_analytics_respects_targets_hidden_securities_and_empty_states ... ok
 test_portfolio_history_respects_range_and_hidden_securities ... ok
 test_portfolio_summary_matches_golden_fixture ... ok
 test_preview_golden_csv_matches_fixture_without_persisting ... ok
@@ -84,8 +88,11 @@ test_upload_transactions_skips_duplicates_and_lists_accounts ... ok
 test_duplicate_preview_fixture_marks_duplicate_rows ... ok
 test_golden_fixture_matches_expected_portfolio_history ... ok
 test_golden_fixture_matches_expected_summary ... ok
+test_analytics_ui_calls_backend_endpoints ... ok
+test_backend_empty_analytics_does_not_render_demo_activity ... ok
 test_backend_empty_history_does_not_render_demo_monthly_chart ... ok
 test_market_price_parser_keeps_dot_decimal_prices ... ok
+test_allocation_targets_replace_and_validate_per_portfolio ... ok
 test_dca_settings_are_persisted_per_portfolio ... ok
 test_hidden_securities_are_persisted_per_portfolio ... ok
 test_import_allows_same_security_with_different_quantity ... ok
@@ -105,16 +112,20 @@ test_preview_fortuneo_bourse_without_security_code_reports_mapping_error ... ok
 test_preview_fortuneo_bourse_zip_reports_mapping_row ... ok
 test_enhanced_dca_applies_settings_multiplier_bounds ... ok
 test_enhanced_dca_increases_on_market_drawdown ... ok
+test_allocation_drift_with_partial_and_target_only_allocations ... ok
+test_allocation_drift_without_targets_keeps_current_allocation_read_only ... ok
+test_benchmark_comparison_handles_complete_missing_and_zero_start_history ... ok
 test_normalize_yfinance_history ... ok
 test_normalize_yfinance_search_quotes ... ok
 test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_build_portfolio_history_with_normalized_benchmarks ... ok
 test_build_portfolio_intraday_history_with_normalized_benchmarks ... ok
+test_monthly_activity_groups_contributions_proceeds_dividends_and_fees ... ok
 test_portfolio_history_starts_at_first_transaction ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 60 tests
+Ran 69 tests
 
 OK
 ```
@@ -205,6 +216,7 @@ INFO  [alembic.runtime.migration] Running upgrade 20260524_0002 -> 20260524_0003
 INFO  [alembic.runtime.migration] Running upgrade 20260524_0003 -> 20260530_0004, Add security mappings.
 INFO  [alembic.runtime.migration] Running upgrade 20260530_0004 -> 20260607_0005, Add hidden securities.
 INFO  [alembic.runtime.migration] Running upgrade 20260607_0005 -> 20260609_0006, Add intraday market price history.
+INFO  [alembic.runtime.migration] Running upgrade 20260609_0006 -> 20260614_0007, Add allocation targets.
 ```
 
 Then inspect the tables:
@@ -224,6 +236,7 @@ Expected output includes:
 ```text
 accounts
 alembic_version
+allocation_targets
 dca_settings
 hidden_securities
 import_sessions
@@ -476,9 +489,11 @@ Purpose:
 - verify the browser can load the standalone frontend;
 - verify CORS allows the frontend to talk to the backend;
 - verify the page can connect to `/api/health`, `/api/portfolios`, `/api/accounts`, and `/api/portfolio`;
+- verify the analytics section calls `/api/allocation-targets` and `/api/portfolio/analytics`;
 - verify CSV/ZIP preview, security-label mapping, and confirmed upload use the backend when connected;
 - verify chart range switching calls daily or intraday history endpoints as appropriate;
 - verify hide/restore and delete/re-import controls use the backend when connected.
+- verify target allocation edits save and refresh drift rows without rendering demo analytics as backend data.
 
 Expected page behavior:
 
@@ -497,6 +512,7 @@ Imported 4 row(s), skipped 0 duplicate(s) from fortuneo_transactions_sample.csv.
 ```
 
 - for a Fortuneo bourse CSV or ZIP that has `libelle` but no `Code valeur`, preview shows `Map` rows; confirm each ticker suggestion before clicking `Confirm import`.
+- the Portfolio Analytics section shows editable target inputs, allocation drift, monthly activity, and benchmark comparison cards when backend data exists.
 
 If the page says:
 
@@ -558,6 +574,15 @@ Run hidden-security and ticker deletion smoke checks after changing:
 - `/api/transactions/{ticker}` deletion;
 - portfolio summary/history filtering.
 
+Run allocation target and portfolio analytics tests after changing:
+
+- `AllocationTargetRecord`;
+- allocation target repository functions;
+- `/api/allocation-targets`;
+- `/api/portfolio/analytics`;
+- `backend/app/services/portfolio_analytics.py`;
+- frontend analytics rendering in `frontend/index.html`.
+
 Run frontend backend connection smoke tests after changing:
 
 - `frontend/index.html`;
@@ -610,7 +635,7 @@ Purpose:
 - call FastAPI endpoints through `TestClient` instead of calling services directly;
 - use an isolated in-memory SQLite database by overriding the `get_db` dependency;
 - verify response-model serialization for `Decimal`, `date`, and `datetime` fields;
-- exercise the golden CSV preview/upload, mapping-assisted Fortuneo upload, duplicate-safe re-upload, account listing, price updates, hidden securities, ticker deletion/re-import, portfolio summary, daily and intraday market history, portfolio history, DCA settings, DCA recommendation, and validation error paths.
+- exercise the golden CSV preview/upload, mapping-assisted Fortuneo upload, duplicate-safe re-upload, account listing, price updates, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, daily and intraday market history, portfolio history, DCA settings, DCA recommendation, and validation error paths.
 
 Run these after changing:
 
@@ -624,11 +649,12 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 60 tests, OK
+Automated tests: 69 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works
 Intraday market prices: backfill, range filtering, and daily fallback work
 Hidden securities: filter summaries/history without deleting transactions
+Allocation analytics: targets persist per portfolio, hidden securities stay excluded, missing benchmark history is an empty comparison
 Frontend: demo fallback works, backend-connected mode works when FastAPI is running
 ```

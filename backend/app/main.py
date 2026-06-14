@@ -19,6 +19,7 @@ from app.database import SessionLocal, get_db, initialize_database
 from app.domain import Transaction, TransactionType
 from app.repositories import (
     DEFAULT_PORTFOLIO_ID,
+    AllocationTarget,
     DcaSettings,
     add_transaction as save_transaction,
     bootstrap_reference_data,
@@ -35,6 +36,7 @@ from app.repositories import (
     get_security_mapping_symbols,
     import_transactions,
     IntradayMarketPricePoint,
+    list_allocation_targets as load_allocation_targets,
     list_intraday_market_prices,
     list_hidden_securities as load_hidden_securities,
     list_market_price_history,
@@ -45,6 +47,7 @@ from app.repositories import (
     MarketPriceHistoryPoint,
     SecurityMapping,
     transaction_fingerprint,
+    replace_allocation_targets,
     upsert_dca_settings,
     upsert_hidden_security,
     upsert_intraday_market_prices_many,
@@ -55,6 +58,8 @@ from app.repositories import (
 from app.schemas import (
     AccountIn,
     AccountOut,
+    AllocationTargetIn,
+    AllocationTargetOut,
     DeletedCountOut,
     DcaRequest,
     DcaRecommendationOut,
@@ -74,6 +79,7 @@ from app.schemas import (
     MarketQuoteOut,
     PortfolioHistoryPointOut,
     PortfolioIntradayHistoryPointOut,
+    PortfolioAnalyticsOut,
     PortfolioIn,
     PortfolioOut,
     PortfolioSummaryOut,
@@ -90,6 +96,7 @@ from app.services.csv_import import preview_transactions_csv, parse_transactions
 from app.services.dca import calculate_enhanced_dca
 from app.services.market_data import DEFAULT_BENCHMARKS, YFinanceMarketDataProvider
 from app.services.portfolio import summarize_portfolio
+from app.services.portfolio_analytics import AllocationTargetInput, build_portfolio_analytics
 from app.services.portfolio_history import build_portfolio_history
 from app.services.portfolio_intraday import build_portfolio_intraday_history
 
@@ -387,6 +394,36 @@ def restore_tracking_security(
     return {"deleted": int(delete_hidden_security(db, ticker=ticker, portfolio_id=portfolio_id))}
 
 
+@app.get("/api/allocation-targets", response_model=list[AllocationTargetOut])
+def list_allocation_targets(
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    """@brief Return saved target allocations for one portfolio."""
+    return [_allocation_target_payload(record, portfolio_id) for record in load_allocation_targets(db, portfolio_id=portfolio_id)]
+
+
+@app.put("/api/allocation-targets", response_model=list[AllocationTargetOut])
+def set_allocation_targets(
+    payload: list[AllocationTargetIn],
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    """@brief Replace a portfolio's target allocations with one validated bulk payload."""
+    try:
+        records = replace_allocation_targets(
+            db,
+            [
+                AllocationTarget(ticker=target.ticker, target_percent=target.target_percent)
+                for target in payload
+            ],
+            portfolio_id=portfolio_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [_allocation_target_payload(record, portfolio_id) for record in records]
+
+
 @app.get("/api/securities/search", response_model=list[SymbolSearchCandidateOut])
 def search_securities(
     query: str,
@@ -615,6 +652,52 @@ def get_portfolio(
     """@brief Return the current visible portfolio summary."""
     transactions = _visible_transactions(db, portfolio_id)
     return summarize_portfolio(transactions, get_market_prices(db))
+
+
+@app.get("/api/portfolio/analytics", response_model=PortfolioAnalyticsOut)
+def get_portfolio_analytics(
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """@brief Return allocation, activity, and benchmark analytics for visible holdings."""
+    hidden_symbols = get_hidden_security_symbols(db, portfolio_id=portfolio_id)
+    transactions = _visible_transactions(db, portfolio_id)
+    summary = summarize_portfolio(transactions, get_market_prices(db))
+    history_points = []
+    if transactions:
+        symbols = sorted({transaction.ticker for transaction in transactions})
+        price_history = {
+            symbol: _history_map(list_market_price_history(db, symbol=symbol, start_date=start_date, end_date=end_date))
+            for symbol in symbols
+        }
+        benchmark_history = {
+            symbol: _history_map(list_market_price_history(db, symbol=symbol, start_date=start_date, end_date=end_date))
+            for symbol in DEFAULT_BENCHMARKS
+        }
+        history_points = build_portfolio_history(
+            transactions,
+            prices_by_symbol=price_history,
+            benchmarks_by_symbol=benchmark_history,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    analytics = build_portfolio_analytics(
+        transactions,
+        summary=summary,
+        allocation_targets=[
+            AllocationTargetInput(ticker=record.ticker, target_percent=record.target_percent)
+            for record in load_allocation_targets(db, portfolio_id=portfolio_id)
+            if record.ticker.upper() not in hidden_symbols
+        ],
+        history_points=history_points,
+        benchmark_names=DEFAULT_BENCHMARKS,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    return _portfolio_analytics_payload(analytics)
 
 
 @app.get("/api/portfolio/history", response_model=list[PortfolioHistoryPointOut])
@@ -916,6 +999,18 @@ def _hidden_security_payload(record: object, portfolio_id: str) -> dict[str, obj
     }
 
 
+def _allocation_target_payload(record: object, portfolio_id: str) -> dict[str, object]:
+    """@brief Serialize an allocation target record with its route portfolio id."""
+    return {
+        "id": record.id,
+        "portfolio_id": portfolio_id,
+        "ticker": record.ticker,
+        "target_percent": record.target_percent,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    }
+
+
 def _market_price_history_payload(record: object) -> dict[str, object]:
     return {
         "symbol": record.symbol,
@@ -963,6 +1058,57 @@ def _portfolio_intraday_history_payload(point: object) -> dict[str, object]:
         "gain": point.gain,
         "gain_percent": point.gain_percent,
         "benchmarks": point.benchmarks,
+    }
+
+
+def _portfolio_analytics_payload(analytics: object) -> dict[str, object]:
+    return {
+        "total_value": analytics.total_value,
+        "total_target_percent": analytics.total_target_percent,
+        "unassigned_target_percent": analytics.unassigned_target_percent,
+        "allocation_drift": [
+            {
+                "ticker": row.ticker,
+                "name": row.name,
+                "current_value": row.current_value,
+                "current_percent": row.current_percent,
+                "target_percent": row.target_percent,
+                "target_value": row.target_value,
+                "drift_percent": row.drift_percent,
+                "drift_value": row.drift_value,
+                "buy_value": row.buy_value,
+                "trim_value": row.trim_value,
+                "action": row.action,
+            }
+            for row in analytics.allocation_drift
+        ],
+        "monthly_activity": [
+            {
+                "month": row.month,
+                "buy_contributions": row.buy_contributions,
+                "sell_proceeds": row.sell_proceeds,
+                "dividends": row.dividends,
+                "fees": row.fees,
+                "net_cash_flow": row.net_cash_flow,
+            }
+            for row in analytics.monthly_activity
+        ],
+        "benchmark_comparison": [
+            {
+                "symbol": row.symbol,
+                "name": row.name,
+                "start_date": row.start_date,
+                "end_date": row.end_date,
+                "portfolio_start_value": row.portfolio_start_value,
+                "portfolio_end_value": row.portfolio_end_value,
+                "portfolio_return_percent": row.portfolio_return_percent,
+                "benchmark_start_value": row.benchmark_start_value,
+                "benchmark_end_value": row.benchmark_end_value,
+                "benchmark_return_percent": row.benchmark_return_percent,
+                "relative_return_percent": row.relative_return_percent,
+            }
+            for row in analytics.benchmark_comparison
+        ],
     }
 
 

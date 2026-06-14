@@ -300,6 +300,95 @@ class ApiRouteTests(unittest.TestCase):
         restored_summary = self.client.get("/api/portfolio?portfolio_id=default")
         self.assertIn("CW8.PA", {holding["ticker"] for holding in restored_summary.json()["holdings"]})
 
+    def test_allocation_target_routes_replace_and_validate_payloads(self):
+        empty = self.client.get("/api/allocation-targets?portfolio_id=default")
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json(), [])
+
+        created = self.client.put(
+            "/api/allocation-targets?portfolio_id=default",
+            json=[
+                {"ticker": "cw8.pa", "target_percent": "70"},
+                {"ticker": "ewld.pa", "target_percent": "10"},
+            ],
+        )
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(
+            [(row["ticker"], row["target_percent"]) for row in created.json()],
+            [("CW8.PA", "70.0000"), ("EWLD.PA", "10.0000")],
+        )
+
+        self.client.put(
+            "/api/allocation-targets?portfolio_id=long-term",
+            json=[{"ticker": "wrd.pa", "target_percent": "60"}],
+        )
+        replaced = self.client.put(
+            "/api/allocation-targets?portfolio_id=default",
+            json=[{"ticker": "veur.as", "target_percent": "20"}],
+        )
+        self.assertEqual([(row["ticker"], row["target_percent"]) for row in replaced.json()], [("VEUR.AS", "20.0000")])
+        self.assertEqual(
+            [row["ticker"] for row in self.client.get("/api/allocation-targets?portfolio_id=long-term").json()],
+            ["WRD.PA"],
+        )
+
+        invalid = self.client.put(
+            "/api/allocation-targets?portfolio_id=default",
+            json=[
+                {"ticker": "CW8.PA", "target_percent": "70"},
+                {"ticker": "EWLD.PA", "target_percent": "40"},
+            ],
+        )
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("less than or equal to 100", invalid.json()["detail"])
+
+    def test_portfolio_analytics_respects_targets_hidden_securities_and_empty_states(self):
+        market_history = load_json("market_history_basic.json")
+
+        empty = self.client.get("/api/portfolio/analytics?portfolio_id=empty")
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["total_value"], "0.00")
+        self.assertEqual(empty.json()["allocation_drift"], [])
+        self.assertEqual(empty.json()["monthly_activity"], [])
+        self.assertEqual(empty.json()["benchmark_comparison"], [])
+
+        self._upload_golden_csv()
+        self.client.put("/api/market/prices", json={"prices": market_history["latest_prices"]})
+        self.client.put("/api/market/history", json={"prices": market_history["prices"]})
+        self.client.put(
+            "/api/allocation-targets?portfolio_id=default",
+            json=[
+                {"ticker": "CW8.PA", "target_percent": "70"},
+                {"ticker": "EWLD.PA", "target_percent": "10"},
+            ],
+        )
+
+        analytics = self.client.get("/api/portfolio/analytics?portfolio_id=default")
+        self.assertEqual(analytics.status_code, 200)
+        payload = analytics.json()
+        self.assertEqual(payload["total_value"], "2991.10")
+        self.assertEqual(payload["total_target_percent"], "80.00")
+        self.assertEqual(payload["unassigned_target_percent"], "20.00")
+        drift = {row["ticker"]: row for row in payload["allocation_drift"]}
+        self.assertEqual(drift["CW8.PA"]["action"], "trim")
+        self.assertEqual(drift["CW8.PA"]["target_value"], "2093.77")
+        self.assertEqual(drift["EWLD.PA"]["action"], "buy")
+        self.assertEqual(drift["EWLD.PA"]["buy_value"], "88.51")
+        self.assertIsNone(drift["VEUR.AS"]["target_percent"])
+        self.assertEqual(payload["monthly_activity"][0]["month"], "2026-01")
+        self.assertEqual(payload["monthly_activity"][0]["buy_contributions"], "1413.45")
+        self.assertEqual({row["symbol"] for row in payload["benchmark_comparison"]}, {"^GSPC", "^NDX"})
+
+        self.client.put("/api/hidden-securities?portfolio_id=default", json={"ticker": "CW8.PA"})
+        hidden_analytics = self.client.get("/api/portfolio/analytics?portfolio_id=default")
+        self.assertNotIn("CW8.PA", {row["ticker"] for row in hidden_analytics.json()["allocation_drift"]})
+        self.assertEqual(hidden_analytics.json()["total_value"], "429.60")
+
+        self.client.delete("/api/hidden-securities?portfolio_id=default&ticker=CW8.PA")
+        missing_benchmarks = self.client.get("/api/portfolio/analytics?portfolio_id=default&start_date=2026-06-01&end_date=2026-06-02")
+        self.assertEqual(missing_benchmarks.status_code, 200)
+        self.assertEqual(missing_benchmarks.json()["benchmark_comparison"], [])
+
     def test_market_history_and_portfolio_history_match_golden_fixture(self):
         expected = load_json("expected_portfolio_summary.json")
         market_history = load_json("market_history_basic.json")

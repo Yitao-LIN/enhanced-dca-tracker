@@ -16,6 +16,7 @@ from app.services.csv_import import parse_transactions_csv, preview_transactions
 from app.services.dca import calculate_enhanced_dca
 from app.services.market_data import normalize_yfinance_history, normalize_yfinance_search_quotes
 from app.services.portfolio import build_holdings, summarize_portfolio
+from app.services.portfolio_analytics import AllocationTargetInput, build_portfolio_analytics
 from app.services.portfolio_history import build_portfolio_history
 from app.services.portfolio_intraday import build_portfolio_intraday_history
 
@@ -250,6 +251,120 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(history[0].market_value, Decimal("112.00"))
         self.assertEqual(history[1].market_value, Decimal("114.00"))
         self.assertEqual(history[1].benchmarks["^GSPC"], Decimal("113.12"))
+
+
+class PortfolioAnalyticsTests(unittest.TestCase):
+    def test_allocation_drift_with_partial_and_target_only_allocations(self):
+        transactions = [
+            Transaction(date(2026, 1, 1), "AAA", TransactionType.BUY, Decimal("2"), Decimal("100")),
+            Transaction(date(2026, 1, 1), "BBB", TransactionType.BUY, Decimal("1"), Decimal("100")),
+        ]
+        summary = summarize_portfolio(transactions, {"AAA": Decimal("120"), "BBB": Decimal("80")})
+
+        analytics = build_portfolio_analytics(
+            transactions,
+            summary=summary,
+            allocation_targets=[
+                AllocationTargetInput("AAA", Decimal("50")),
+                AllocationTargetInput("BBB", Decimal("30")),
+                AllocationTargetInput("CCC", Decimal("20")),
+            ],
+            history_points=[],
+            benchmark_names={},
+        )
+
+        rows = {row.ticker: row for row in analytics.allocation_drift}
+        self.assertEqual(analytics.total_target_percent, Decimal("100.00"))
+        self.assertEqual(rows["AAA"].action, "trim")
+        self.assertEqual(rows["AAA"].current_percent, Decimal("75.00"))
+        self.assertEqual(rows["AAA"].target_value, Decimal("160.00"))
+        self.assertEqual(rows["AAA"].trim_value, Decimal("80.00"))
+        self.assertEqual(rows["BBB"].action, "buy")
+        self.assertEqual(rows["BBB"].buy_value, Decimal("16.00"))
+        self.assertEqual(rows["CCC"].current_value, Decimal("0.00"))
+        self.assertEqual(rows["CCC"].buy_value, Decimal("64.00"))
+
+    def test_allocation_drift_without_targets_keeps_current_allocation_read_only(self):
+        transactions = [Transaction(date(2026, 1, 1), "AAA", TransactionType.BUY, Decimal("2"), Decimal("100"))]
+        summary = summarize_portfolio(transactions, {"AAA": Decimal("120")})
+
+        analytics = build_portfolio_analytics(
+            transactions,
+            summary=summary,
+            allocation_targets=[],
+            history_points=[],
+            benchmark_names={},
+        )
+
+        self.assertEqual(analytics.unassigned_target_percent, Decimal("100.00"))
+        self.assertIsNone(analytics.allocation_drift[0].target_percent)
+        self.assertEqual(analytics.allocation_drift[0].action, "unassigned")
+
+    def test_monthly_activity_groups_contributions_proceeds_dividends_and_fees(self):
+        transactions = [
+            Transaction(date(2026, 1, 1), "AAA", TransactionType.BUY, Decimal("2"), Decimal("100"), fees=Decimal("1")),
+            Transaction(date(2026, 1, 5), "AAA", TransactionType.SELL, Decimal("1"), Decimal("120"), fees=Decimal("2")),
+            Transaction(date(2026, 2, 1), "AAA", TransactionType.DIVIDEND, Decimal("1"), Decimal("5")),
+            Transaction(date(2026, 2, 3), "CASH", TransactionType.FEE, Decimal("0"), Decimal("0"), fees=Decimal("3")),
+        ]
+
+        analytics = build_portfolio_analytics(
+            transactions,
+            summary=summarize_portfolio(transactions, {"AAA": Decimal("120")}),
+            allocation_targets=[],
+            history_points=[],
+            benchmark_names={},
+        )
+
+        january, february = analytics.monthly_activity
+        self.assertEqual(january.month, "2026-01")
+        self.assertEqual(january.buy_contributions, Decimal("201.00"))
+        self.assertEqual(january.sell_proceeds, Decimal("118.00"))
+        self.assertEqual(january.fees, Decimal("3.00"))
+        self.assertEqual(january.net_cash_flow, Decimal("-83.00"))
+        self.assertEqual(february.dividends, Decimal("5.00"))
+        self.assertEqual(february.fees, Decimal("3.00"))
+        self.assertEqual(february.net_cash_flow, Decimal("2.00"))
+
+    def test_benchmark_comparison_handles_complete_missing_and_zero_start_history(self):
+        transactions = [Transaction(date(2026, 1, 1), "AAA", TransactionType.BUY, Decimal("1"), Decimal("100"))]
+        history = build_portfolio_history(
+            transactions,
+            prices_by_symbol={"AAA": {date(2026, 1, 1): Decimal("100"), date(2026, 1, 2): Decimal("110")}},
+            benchmarks_by_symbol={"^GSPC": {date(2026, 1, 1): Decimal("1000"), date(2026, 1, 2): Decimal("1100")}},
+        )
+
+        analytics = build_portfolio_analytics(
+            transactions,
+            summary=summarize_portfolio(transactions, {"AAA": Decimal("110")}),
+            allocation_targets=[],
+            history_points=history,
+            benchmark_names={"^GSPC": "S&P 500", "^NDX": "Nasdaq 100"},
+        )
+
+        self.assertEqual(len(analytics.benchmark_comparison), 1)
+        self.assertEqual(analytics.benchmark_comparison[0].portfolio_return_percent, Decimal("10.00"))
+        self.assertEqual(analytics.benchmark_comparison[0].benchmark_return_percent, Decimal("10.00"))
+        self.assertEqual(analytics.benchmark_comparison[0].relative_return_percent, Decimal("0.00"))
+
+        zero_start = type(
+            "Point",
+            (),
+            {"market_value": Decimal("0"), "benchmarks": {"^GSPC": Decimal("100")}, "price_date": date(2026, 1, 1)},
+        )()
+        zero_end = type(
+            "Point",
+            (),
+            {"market_value": Decimal("100"), "benchmarks": {"^GSPC": Decimal("110")}, "price_date": date(2026, 1, 2)},
+        )()
+        empty = build_portfolio_analytics(
+            transactions,
+            summary=summarize_portfolio(transactions, {"AAA": Decimal("110")}),
+            allocation_targets=[],
+            history_points=[zero_start, zero_end],
+            benchmark_names={"^GSPC": "S&P 500"},
+        )
+        self.assertEqual(empty.benchmark_comparison, [])
 
 
 class DcaTests(unittest.TestCase):

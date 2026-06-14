@@ -172,6 +172,45 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(default_after_delete, set())
         self.assertEqual(long_term_after_delete, {"WRD.PA"})
 
+    def test_allocation_targets_replace_and_validate_per_portfolio(self):
+        from app.repositories import AllocationTarget, create_portfolio, list_allocation_targets, replace_allocation_targets
+
+        with self.Session() as db:
+            create_portfolio(db, name="Long Term", slug="long-term")
+            default_targets = replace_allocation_targets(
+                db,
+                [
+                    AllocationTarget("cw8.pa", Decimal("70")),
+                    AllocationTarget("ewld.pa", Decimal("10")),
+                ],
+            )
+            replace_allocation_targets(
+                db,
+                [AllocationTarget("wrd.pa", Decimal("60"))],
+                portfolio_id="long-term",
+            )
+            replaced = replace_allocation_targets(db, [AllocationTarget("VEUR.AS", Decimal("20"))])
+            default_after_replace = list_allocation_targets(db)
+            long_term_targets = list_allocation_targets(db, portfolio_id="long-term")
+
+            with self.assertRaisesRegex(ValueError, "Ticker is required"):
+                replace_allocation_targets(db, [AllocationTarget("", Decimal("10"))])
+            with self.assertRaisesRegex(ValueError, "between 0 and 100"):
+                replace_allocation_targets(db, [AllocationTarget("CW8.PA", Decimal("-1"))])
+            with self.assertRaisesRegex(ValueError, "less than or equal to 100"):
+                replace_allocation_targets(
+                    db,
+                    [
+                        AllocationTarget("CW8.PA", Decimal("70")),
+                        AllocationTarget("EWLD.PA", Decimal("40")),
+                    ],
+                )
+
+        self.assertEqual([target.ticker for target in default_targets], ["CW8.PA", "EWLD.PA"])
+        self.assertEqual([target.ticker for target in replaced], ["VEUR.AS"])
+        self.assertEqual([(target.ticker, target.target_percent) for target in default_after_replace], [("VEUR.AS", Decimal("20.0000"))])
+        self.assertEqual([(target.ticker, target.target_percent) for target in long_term_targets], [("WRD.PA", Decimal("60.0000"))])
+
     def test_import_skips_duplicate_transactions(self):
         from app.domain import Transaction, TransactionType
         from app.repositories import import_transactions, list_transactions

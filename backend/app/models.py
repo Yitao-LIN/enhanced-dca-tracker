@@ -127,6 +127,24 @@ class HiddenSecurityRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class AllocationTargetRecord(Base):
+    """@brief Target portfolio allocation percentage for one ticker."""
+
+    __tablename__ = "allocation_targets"
+    __table_args__ = (UniqueConstraint("portfolio_record_id", "ticker", name="uq_allocation_targets_portfolio_ticker"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    portfolio_record_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), index=True)
+    ticker: Mapped[str] = mapped_column(String(32), index=True)
+    target_percent: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class MarketPriceRecord(Base):
     """@brief Latest known market price for one symbol."""
 

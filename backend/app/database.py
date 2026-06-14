@@ -75,6 +75,7 @@ def _needs_legacy_baseline_stamp() -> bool:
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     app_tables = {
+        "allocation_targets",
         "accounts",
         "dca_settings",
         "import_sessions",

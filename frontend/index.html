@@ -204,6 +204,101 @@
         margin-top: 12px;
       }
 
+      .analytics-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+        gap: 14px;
+        align-items: start;
+      }
+
+      .analytics-table {
+        min-width: 820px;
+      }
+
+      .target-input {
+        max-width: 92px;
+        text-align: right;
+      }
+
+      .target-add {
+        display: grid;
+        grid-template-columns: minmax(110px, 1fr) minmax(100px, 0.7fr) auto;
+        gap: 8px;
+        align-items: end;
+        margin-top: 12px;
+      }
+
+      .drift-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .drift-row {
+        display: grid;
+        gap: 6px;
+      }
+
+      .drift-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        font-size: 12px;
+      }
+
+      .drift-track {
+        position: relative;
+        height: 11px;
+        border-radius: 999px;
+        background: #edf0f4;
+        overflow: hidden;
+      }
+
+      .drift-fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-radius: inherit;
+        background: var(--blue);
+      }
+
+      .target-marker {
+        position: absolute;
+        top: -2px;
+        bottom: -2px;
+        width: 3px;
+        border-radius: 999px;
+        background: var(--amber);
+      }
+
+      .activity-list,
+      .benchmark-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .activity-item,
+      .benchmark-item {
+        display: grid;
+        gap: 5px;
+        border-top: 1px solid var(--line);
+        padding-top: 9px;
+        font-size: 13px;
+      }
+
+      .activity-item:first-child,
+      .benchmark-item:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+
+      .activity-values,
+      .benchmark-values {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
       .mini-stat {
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -557,8 +652,13 @@
       @media (max-width: 920px) {
         .metrics,
         .workbench,
+        .analytics-layout,
         .controls,
         .summary-row {
+          grid-template-columns: 1fr;
+        }
+
+        .target-add {
           grid-template-columns: 1fr;
         }
 
@@ -608,6 +708,15 @@
         total_gain: 0,
         total_gain_percent: 0,
         holdings: [],
+      };
+
+      const emptyPortfolioAnalytics = {
+        total_value: 0,
+        total_target_percent: 0,
+        unassigned_target_percent: 100,
+        allocation_drift: [],
+        monthly_activity: [],
+        benchmark_comparison: [],
       };
 
       /** @brief Format a numeric EUR value for compact dashboard display. */
@@ -812,6 +921,90 @@
           allocation: toNumber(holding.allocation_percent),
           currency: holding.currency || "EUR",
         }));
+      }
+
+      /** @brief Build read-only allocation analytics for offline demo mode. */
+      function demoAllocationRows(holdings) {
+        return holdings.map((holding) => ({
+          ticker: holding.ticker,
+          name: holding.name || "",
+          currentValue: holding.value,
+          currentPercent: holding.allocation,
+          targetPercent: null,
+          targetValue: null,
+          driftPercent: null,
+          driftValue: null,
+          buyValue: 0,
+          trimValue: 0,
+          action: "current",
+        }));
+      }
+
+      /** @brief Convert API analytics rows from Decimal strings to display numbers. */
+      function analyticsRowsFromApi(analytics) {
+        return (analytics.allocation_drift || []).map((row) => ({
+          ticker: row.ticker,
+          name: row.name || "",
+          currentValue: toNumber(row.current_value),
+          currentPercent: toNumber(row.current_percent),
+          targetPercent: row.target_percent === null || row.target_percent === undefined ? null : toNumber(row.target_percent),
+          targetValue: row.target_value === null || row.target_value === undefined ? null : toNumber(row.target_value),
+          driftPercent: row.drift_percent === null || row.drift_percent === undefined ? null : toNumber(row.drift_percent),
+          driftValue: row.drift_value === null || row.drift_value === undefined ? null : toNumber(row.drift_value),
+          buyValue: toNumber(row.buy_value),
+          trimValue: toNumber(row.trim_value),
+          action: row.action || "unassigned",
+        }));
+      }
+
+      /** @brief Seed editable target drafts from saved targets and visible analytics rows. */
+      function targetDraftsFromRows(targetRows, analyticsRows = []) {
+        const drafts = {};
+        analyticsRows.forEach((row) => {
+          drafts[row.ticker] = row.target_percent === null || row.target_percent === undefined ? "" : String(toNumber(row.target_percent));
+        });
+        targetRows.forEach((row) => {
+          drafts[row.ticker] = String(toNumber(row.target_percent));
+        });
+        return drafts;
+      }
+
+      /** @brief Convert editable target draft state into the bulk API payload. */
+      function targetPayloadFromDrafts(drafts, newTarget) {
+        const targets = new Map();
+        Object.entries(drafts).forEach(([ticker, rawPercent]) => {
+          const symbol = String(ticker || "").trim().toUpperCase();
+          const raw = String(rawPercent ?? "").trim();
+          if (!symbol || raw === "") return;
+          const targetPercent = Number(raw);
+          if (!Number.isFinite(targetPercent)) throw new Error(`Invalid target percent for ${symbol}.`);
+          targets.set(symbol, { ticker: symbol, target_percent: targetPercent });
+        });
+        const newSymbol = String(newTarget.ticker || "").trim().toUpperCase();
+        const newRaw = String(newTarget.target_percent ?? "").trim();
+        if (newSymbol || newRaw) {
+          const targetPercent = Number(newRaw);
+          if (!newSymbol) throw new Error("Ticker is required.");
+          if (!Number.isFinite(targetPercent)) throw new Error(`Invalid target percent for ${newSymbol}.`);
+          targets.set(newSymbol, { ticker: newSymbol, target_percent: targetPercent });
+        }
+        return Array.from(targets.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
+      }
+
+      /** @brief Render backend allocation action codes as compact labels. */
+      function actionLabel(action) {
+        return {
+          buy: "Buy",
+          trim: "Trim",
+          hold: "Hold",
+          unassigned: "Unassigned",
+          current: "Current",
+        }[action] || action;
+      }
+
+      /** @brief Format a EUR value with an explicit positive sign. */
+      function signedMoney(value) {
+        return `${value >= 0 ? "+" : ""}${money(value)}`;
       }
 
       /** @brief Mirror the backend Enhanced DCA rule when running in demo mode. */
@@ -1067,6 +1260,10 @@
         const [accounts, setAccounts] = useState([]);
         const [selectedPortfolioId, setSelectedPortfolioId] = useState("default");
         const [portfolioHistory, setPortfolioHistory] = useState([]);
+        const [portfolioAnalytics, setPortfolioAnalytics] = useState(emptyPortfolioAnalytics);
+        const [allocationTargets, setAllocationTargets] = useState([]);
+        const [targetDrafts, setTargetDrafts] = useState({});
+        const [newTarget, setNewTarget] = useState({ ticker: "", target_percent: "" });
         const [chartRange, setChartRange] = useState("1y");
         const [visibleBenchmarks, setVisibleBenchmarks] = useState({ sp500: true, nasdaq100: true });
         const [hiddenSecurities, setHiddenSecurities] = useState([]);
@@ -1094,6 +1291,11 @@
         const totalInvested = apiAvailable ? toNumber(apiSummary.total_invested) : holdings.reduce((sum, holding) => sum + holding.cost, 0);
         const totalGain = apiAvailable ? toNumber(apiSummary.total_gain) : totalValue - totalInvested;
         const totalGainPercent = apiAvailable ? toNumber(apiSummary.total_gain_percent) : totalInvested ? (totalGain / totalInvested) * 100 : 0;
+        const analyticsRows = apiAvailable ? analyticsRowsFromApi(portfolioAnalytics) : demoAllocationRows(holdings);
+        const monthlyActivity = portfolioAnalytics.monthly_activity || [];
+        const benchmarkComparison = portfolioAnalytics.benchmark_comparison || [];
+        const totalTargetPercent = apiAvailable ? toNumber(portfolioAnalytics.total_target_percent) : 0;
+        const unassignedTargetPercent = apiAvailable ? toNumber(portfolioAnalytics.unassigned_target_percent) : 100;
         const dca = apiDca || calculateDca(baseAmount, marketChange, volatility);
         const previewRows = importPreview?.rows || [];
         const previewNewRows = previewRows.filter((row) => row.status === "new").length;
@@ -1537,6 +1739,9 @@
             await refreshBackendData(selectedPortfolioId, { autoBackfill: true });
           } catch (error) {
             setApiAvailable(false);
+            setPortfolioAnalytics(emptyPortfolioAnalytics);
+            setAllocationTargets([]);
+            setTargetDrafts({});
             setStatus("Backend unavailable. Demo mode is active.");
           } finally {
             setApiLoading(false);
@@ -1561,12 +1766,20 @@
           return `/api/portfolio/history?${historyQuery(portfolioId)}`;
         }
 
+        /** @brief Build the analytics endpoint URL for the selected portfolio and date range. */
+        function analyticsPath(portfolioId = selectedPortfolioId) {
+          return `/api/portfolio/analytics?${queryString({
+            portfolio_id: portfolioId,
+            ...chartDateRange(chartRange),
+          })}`;
+        }
+
         /** @brief Refresh all backend-backed state needed by the dashboard in one pass. */
         async function refreshBackendData(portfolioId = selectedPortfolioId, options = {}) {
           const { autoBackfill = false, quiet = false } = options;
           setApiLoading(true);
           try {
-            const [portfolioRows, accountRows, summary, historyRows, dcaSettings, mappingRows, hiddenRows] = await Promise.all([
+            const [portfolioRows, accountRows, summary, historyRows, dcaSettings, mappingRows, hiddenRows, targetRows, analytics] = await Promise.all([
               apiRequest("/api/portfolios"),
               apiRequest(`/api/accounts?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
@@ -1574,6 +1787,8 @@
               apiRequest(`/api/dca/settings?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(portfolioId)}`),
+              apiRequest(`/api/allocation-targets?portfolio_id=${encodeURIComponent(portfolioId)}`),
+              apiRequest(analyticsPath(portfolioId)),
             ]);
             setPortfolios(portfolioRows);
             setAccounts(accountRows);
@@ -1581,6 +1796,9 @@
             setPortfolioHistory(historyRows);
             setSecurityMappings(mappingRows);
             setHiddenSecurities(hiddenRows);
+            setAllocationTargets(targetRows);
+            setPortfolioAnalytics(analytics);
+            setTargetDrafts(targetDraftsFromRows(targetRows, analytics.allocation_drift || []));
             setMappingDrafts(mappingDraftsFromRows(mappingRows));
             setBaseAmount(toNumber(dcaSettings.base_amount) || 1000);
             setSelectedBenchmark(dcaSettings.preferred_benchmark || "^GSPC");
@@ -1599,10 +1817,13 @@
                   apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
                   apiRequest(historyPath(portfolioId)),
                   apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(portfolioId)}`),
+                  apiRequest(analyticsPath(portfolioId)),
                 ]);
                 setApiSummary(refreshed[0]);
                 setPortfolioHistory(refreshed[1]);
                 setHiddenSecurities(refreshed[2]);
+                setPortfolioAnalytics(refreshed[3]);
+                setTargetDrafts(targetDraftsFromRows(targetRows, refreshed[3].allocation_drift || []));
                 const skipped = result.failures || [];
                 const noIntradayRows = isIntradayRange(chartRange) && result.updated === 0 && skipped.length > 0;
                 if (!quiet || noIntradayRows) {
@@ -1617,6 +1838,9 @@
             }
           } catch (error) {
             setApiAvailable(false);
+            setPortfolioAnalytics(emptyPortfolioAnalytics);
+            setAllocationTargets([]);
+            setTargetDrafts({});
             setStatus(`Backend sync failed: ${error.message}`);
           } finally {
             setApiLoading(false);
@@ -1735,6 +1959,43 @@
             setStatus(`Deleted ${result.deleted} transaction(s) for ${symbol}. You can import them again.`);
           } catch (error) {
             setStatus(`Delete failed: ${error.message}`);
+          }
+        }
+
+        /** @brief Update one editable target percentage in local component state. */
+        function updateTargetDraft(ticker, value) {
+          const symbol = String(ticker || "").trim().toUpperCase();
+          if (!symbol) return;
+          setTargetDrafts((current) => ({
+            ...current,
+            [symbol]: value,
+          }));
+        }
+
+        /** @brief Persist the complete editable allocation target set for the selected portfolio. */
+        async function saveAllocationTargets() {
+          if (!apiAvailable) return;
+          let payload;
+          try {
+            payload = targetPayloadFromDrafts(targetDrafts, newTarget);
+          } catch (error) {
+            setStatus(`Target save failed: ${error.message}`);
+            return;
+          }
+          try {
+            const records = await apiRequest(`/api/allocation-targets?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const analytics = await apiRequest(analyticsPath(selectedPortfolioId));
+            setAllocationTargets(records);
+            setPortfolioAnalytics(analytics);
+            setTargetDrafts(targetDraftsFromRows(records, analytics.allocation_drift || []));
+            setNewTarget({ ticker: "", target_percent: "" });
+            setStatus(`Saved ${records.length} allocation target(s).`);
+          } catch (error) {
+            setStatus(`Target save failed: ${error.message}`);
           }
         }
 
@@ -1934,6 +2195,217 @@
           setVolatility(Number((15 + Math.random() * 18).toFixed(1)));
         }
 
+        /** @brief Render current allocation bars with optional target markers. */
+        function renderDriftBars() {
+          if (!analyticsRows.length) {
+            return <p className="mapping-note">No visible holdings or allocation targets.</p>;
+          }
+          return (
+            <div className="drift-list">
+              {analyticsRows.map((row) => (
+                <div className="drift-row" key={row.ticker}>
+                  <div className="drift-header">
+                    <strong>{row.ticker}</strong>
+                    <span>
+                      {row.currentPercent.toFixed(1)}%
+                      {row.targetPercent !== null && ` / ${row.targetPercent.toFixed(1)}%`}
+                    </span>
+                  </div>
+                  <div className="drift-track" aria-label={`${row.ticker} allocation drift`}>
+                    <span className="drift-fill" style={{ width: `${Math.min(Math.max(row.currentPercent, 0), 100)}%` }} />
+                    {row.targetPercent !== null && (
+                      <span className="target-marker" style={{ left: `${Math.min(Math.max(row.targetPercent, 0), 100)}%` }} />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        /** @brief Render backend analytics or the read-only demo allocation fallback. */
+        function renderAnalyticsSection() {
+          return (
+            <div className="panel">
+              <div className="toolbar">
+                <div>
+                  <h2>Portfolio Analytics</h2>
+                  <p className="subtitle">{apiAvailable ? "Targets, contribution activity, and benchmark comparison" : "Read-only current allocation"}</p>
+                </div>
+                {apiAvailable && (
+                  <button className="primary" disabled={apiLoading} onClick={saveAllocationTargets}>Save targets</button>
+                )}
+              </div>
+
+              <div className="summary-row">
+                <div className="mini-stat">
+                  <span className="label">Targeted</span>
+                  <strong>{totalTargetPercent.toFixed(2)}%</strong>
+                </div>
+                <div className="mini-stat">
+                  <span className="label">Unassigned</span>
+                  <strong>{unassignedTargetPercent.toFixed(2)}%</strong>
+                </div>
+                <div className="mini-stat">
+                  <span className="label">Tracked value</span>
+                  <strong>{money(apiAvailable ? toNumber(portfolioAnalytics.total_value) : totalValue)}</strong>
+                </div>
+                <div className="mini-stat">
+                  <span className="label">Activity months</span>
+                  <strong>{apiAvailable ? monthlyActivity.length : 0}</strong>
+                </div>
+                <div className="mini-stat">
+                  <span className="label">Benchmarks</span>
+                  <strong>{apiAvailable ? benchmarkComparison.length : 0}</strong>
+                </div>
+              </div>
+
+              {!apiAvailable && (
+                <p className="note" style={{ marginTop: 12 }}>Backend unavailable. Current allocation is shown without saved targets or activity analytics.</p>
+              )}
+
+              <div className="analytics-layout" style={{ marginTop: 14 }}>
+                <div className="stack">
+                  <div>
+                    <div className="toolbar">
+                      <h3>Allocation Drift</h3>
+                      {apiAvailable && <span className="subtitle">{allocationTargets.length} saved target(s)</span>}
+                    </div>
+                    {renderDriftBars()}
+                  </div>
+
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="analytics-table">
+                      <thead>
+                        <tr>
+                          <th>Ticker</th>
+                          <th className="num">Current</th>
+                          <th className="num">Target %</th>
+                          <th className="num">Drift</th>
+                          <th className="num">Buy</th>
+                          <th className="num">Trim</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {analyticsRows.map((row) => (
+                          <tr key={row.ticker}>
+                            <td>
+                              <strong>{row.ticker}</strong>
+                              {row.name && <div className="holding-name">{row.name}</div>}
+                            </td>
+                            <td className="num">{money(row.currentValue)} ({row.currentPercent.toFixed(1)}%)</td>
+                            <td className="num">
+                              {apiAvailable ? (
+                                <input
+                                  className="target-input"
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  step="0.01"
+                                  value={targetDrafts[row.ticker] ?? ""}
+                                  onChange={(event) => updateTargetDraft(row.ticker, event.target.value)}
+                                  aria-label={`${row.ticker} target percent`}
+                                />
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                            <td className={`num ${row.driftValue > 0 ? "negative" : row.driftValue < 0 ? "positive" : ""}`}>
+                              {row.driftValue === null ? "-" : `${signedMoney(row.driftValue)} (${percent(row.driftPercent)})`}
+                            </td>
+                            <td className="num">{money(row.buyValue)}</td>
+                            <td className="num">{money(row.trimValue)}</td>
+                            <td><span className="badge mapping">{actionLabel(row.action)}</span></td>
+                          </tr>
+                        ))}
+                        {!analyticsRows.length && (
+                          <tr>
+                            <td colSpan="7" className="mapping-note">No analytics rows.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {apiAvailable && (
+                    <div className="target-add">
+                      <div>
+                        <label>Target ticker</label>
+                        <input
+                          type="text"
+                          value={newTarget.ticker}
+                          onChange={(event) => setNewTarget((current) => ({ ...current, ticker: event.target.value.toUpperCase() }))}
+                        />
+                      </div>
+                      <div>
+                        <label>Target %</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={newTarget.target_percent}
+                          onChange={(event) => setNewTarget((current) => ({ ...current, target_percent: event.target.value }))}
+                        />
+                      </div>
+                      <button disabled={apiLoading} onClick={saveAllocationTargets}>Add target</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="stack">
+                  <div>
+                    <div className="toolbar">
+                      <h3>Monthly Activity</h3>
+                    </div>
+                    <div className="activity-list">
+                      {apiAvailable && monthlyActivity.slice(-6).map((row) => (
+                        <div className="activity-item" key={row.month}>
+                          <strong>{row.month}</strong>
+                          <div className="activity-values">
+                            <span>Buy {money(toNumber(row.buy_contributions))}</span>
+                            <span>Sell {money(toNumber(row.sell_proceeds))}</span>
+                            <span>Dividends {money(toNumber(row.dividends))}</span>
+                            <span>Fees {money(toNumber(row.fees))}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {(!apiAvailable || !monthlyActivity.length) && (
+                        <p className="mapping-note">{apiAvailable ? "No transaction activity in this range." : "Activity analytics require the backend."}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="toolbar">
+                      <h3>Benchmark Comparison</h3>
+                    </div>
+                    <div className="benchmark-list">
+                      {apiAvailable && benchmarkComparison.map((row) => {
+                        const relative = toNumber(row.relative_return_percent);
+                        return (
+                          <div className="benchmark-item" key={row.symbol}>
+                            <strong>{row.name || row.symbol}</strong>
+                            <div className="benchmark-values">
+                              <span>Portfolio {percent(toNumber(row.portfolio_return_percent))}</span>
+                              <span>{row.symbol} {percent(toNumber(row.benchmark_return_percent))}</span>
+                              <span className={relative >= 0 ? "positive" : "negative"}>Relative {percent(relative)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {(!apiAvailable || !benchmarkComparison.length) && (
+                        <p className="mapping-note">{apiAvailable ? "No benchmark history for this range." : "Benchmark comparison requires backend history."}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <main className="app">
             <header className="topbar">
@@ -1944,7 +2416,7 @@
               <div className="actions">
                 <span className="pill">{apiAvailable ? "Backend connected" : "Demo mode"}</span>
                 <button disabled={apiLoading} onClick={connectBackend}>{apiAvailable ? "Sync API" : "Connect API"}</button>
-                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setHiddenSecurities([]); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
+                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setHiddenSecurities([]); setAllocationTargets([]); setPortfolioAnalytics(emptyPortfolioAnalytics); setTargetDrafts({}); setNewTarget({ ticker: "", target_percent: "" }); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
                 <button className="primary" onClick={simulateMarket}>Refresh market simulation</button>
               </div>
             </header>
@@ -2007,6 +2479,8 @@
                     </label>
                   </div>
                 </div>
+
+                {renderAnalyticsSection()}
 
                 <div className="panel">
                   <div className="toolbar">

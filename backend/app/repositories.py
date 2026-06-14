@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.domain import MarketSnapshot, Transaction, TransactionType
 from app.models import (
     AccountRecord,
+    AllocationTargetRecord,
     DcaSettingsRecord,
     HiddenSecurityRecord,
     ImportSessionRecord,
@@ -107,6 +108,14 @@ class SecurityMapping:
     provider_exchange: str | None = None
     provider_quote_type: str | None = None
     provider_currency: str | None = None
+
+
+@dataclass(frozen=True)
+class AllocationTarget:
+    """@brief Value object for one target allocation percentage."""
+
+    ticker: str
+    target_percent: Decimal
 
 
 def ensure_portfolio(
@@ -379,6 +388,45 @@ def delete_hidden_security(db: Session, ticker: str, portfolio_id: str = DEFAULT
     db.delete(record)
     db.commit()
     return True
+
+
+def list_allocation_targets(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> list[AllocationTargetRecord]:
+    """@brief List allocation targets for one portfolio."""
+    slug = _normalize_slug(portfolio_id)
+    portfolio = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
+    if portfolio is None:
+        return []
+    statement = (
+        select(AllocationTargetRecord)
+        .where(AllocationTargetRecord.portfolio_record_id == portfolio.id)
+        .order_by(AllocationTargetRecord.ticker)
+    )
+    return list(db.scalars(statement))
+
+
+def replace_allocation_targets(
+    db: Session,
+    targets: list[AllocationTarget],
+    portfolio_id: str = DEFAULT_PORTFOLIO_ID,
+) -> list[AllocationTargetRecord]:
+    """@brief Replace all allocation targets for one portfolio after validating percentages."""
+    portfolio = ensure_portfolio(db, portfolio_id)
+    normalized_targets = _normalize_allocation_targets(targets)
+    for record in list_allocation_targets(db, portfolio_id=portfolio.slug):
+        db.delete(record)
+    records = [
+        AllocationTargetRecord(
+            portfolio_record_id=portfolio.id,
+            ticker=target.ticker,
+            target_percent=target.target_percent,
+        )
+        for target in normalized_targets
+    ]
+    db.add_all(records)
+    db.commit()
+    for record in records:
+        db.refresh(record)
+    return records
 
 
 def bootstrap_reference_data(db: Session) -> None:
@@ -854,6 +902,26 @@ def _normalize_optional_text(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _normalize_allocation_targets(targets: list[AllocationTarget]) -> list[AllocationTarget]:
+    """@brief Normalize, de-duplicate, and validate target allocation rows before persistence."""
+    unique: dict[str, Decimal] = {}
+    for target in targets:
+        ticker = target.ticker.strip().upper()
+        if not ticker:
+            raise ValueError("Ticker is required.")
+        if target.target_percent < 0 or target.target_percent > 100:
+            raise ValueError("Target percent must be between 0 and 100.")
+        unique[ticker] = target.target_percent
+
+    total_percent = sum(unique.values(), Decimal("0"))
+    if total_percent > Decimal("100"):
+        raise ValueError("Total target percent must be less than or equal to 100.")
+    return [
+        AllocationTarget(ticker=ticker, target_percent=percent)
+        for ticker, percent in sorted(unique.items())
+    ]
 
 
 def _decimal_key(value: Decimal) -> str:

@@ -4,6 +4,8 @@ A personalized investment tracker for an Enhanced Dollar Cost Averaging workflow
 
 - import historical Fortuneo transactions from CSV;
 - compute open holdings, average cost, allocation, and unrealized performance;
+- compare current allocations against editable per-portfolio targets;
+- summarize monthly investment activity and benchmark-relative returns;
 - track market prices manually or through a backend adapter for `yfinance`;
 - compute the next investment amount from market performance and volatility;
 - grow toward a React + FastAPI + PostgreSQL application.
@@ -47,6 +49,7 @@ docs/TESTING.md
 |           |-- csv_import.py          # Fortuneo-like CSV parser
 |           |-- portfolio.py           # holdings and performance calculations
 |           |-- portfolio_history.py   # historical portfolio and benchmark series
+|           |-- portfolio_analytics.py # target allocation, activity, and benchmark analytics
 |           |-- dca.py                 # Enhanced DCA recommendation engine
 |           `-- market_data.py         # static and yfinance market providers
 |-- samples/
@@ -71,6 +74,7 @@ The frontend currently runs without a build step. It uses React from a CDN and i
 - portfolio metrics and holdings table;
 - portfolio/account selection from the API;
 - allocation visualization and backend portfolio history charting;
+- target allocation editing, drift bars, monthly activity, and benchmark comparison when the backend is connected;
 - intraday portfolio ranges with daily-history fallback when intraday rows are unavailable;
 - hidden/security tracking controls and ticker-level transaction deletion for clean re-imports;
 - S&P 500 and Nasdaq 100 benchmark backfill controls;
@@ -155,6 +159,8 @@ DELETE /api/security-mappings
 GET    /api/hidden-securities
 PUT    /api/hidden-securities
 DELETE /api/hidden-securities
+GET    /api/allocation-targets
+PUT    /api/allocation-targets
 GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
@@ -163,6 +169,7 @@ GET    /api/market/history/{ticker}
 POST   /api/market/history/backfill
 POST   /api/market/intraday/backfill
 GET    /api/portfolio
+GET    /api/portfolio/analytics
 GET    /api/portfolio/history
 GET    /api/portfolio/history/intraday
 GET    /api/dca/settings
@@ -170,7 +177,7 @@ PUT    /api/dca/settings
 POST   /api/dca/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, hidden securities, latest market prices, daily market price history, intraday market price history, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, hidden securities, allocation targets, latest market prices, daily market price history, intraday market price history, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
 
 ## Run Automated Tests
 
@@ -186,6 +193,7 @@ Covered behavior:
 - Fortuneo-style semicolon CSV with French number formats;
 - buy/sell cost-basis handling;
 - portfolio value and return calculations;
+- target allocation drift, monthly activity, and benchmark comparison analytics.
 - Enhanced DCA amount adjustment.
 - SQLite repository persistence when SQLAlchemy is installed.
 - duplicate-safe CSV import sessions.
@@ -195,8 +203,9 @@ Covered behavior:
 - persisted DCA settings.
 - persisted and editable per-portfolio Fortuneo security label mappings.
 - hidden security tracking and ticker-level transaction deletion/re-import.
+- persisted per-portfolio allocation targets.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
-- FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, market history, intraday history, DCA settings, hidden securities, deletion, and validation errors.
+- FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, portfolio analytics, allocation targets, market history, intraday history, DCA settings, hidden securities, deletion, and validation errors.
 
 ## CSV Import Format
 
@@ -244,10 +253,10 @@ If volatility is high and the recommendation is already increasing contributions
 
 ## Next Build Steps
 
-1. Add richer analytics for allocation drift, contributions, and benchmark comparison.
-2. Add authentication once local portfolio persistence is working.
-3. Add French tax reporting fields for realized gains and account type, especially PEA vs CTO.
-4. Move the frontend to a full React/Vite app once the standalone page becomes too large to maintain comfortably.
+1. Harden imports and add reconciliation tools against real Fortuneo exports.
+2. Add basic realized gain estimates and French tax/account reporting fields, especially PEA vs CTO.
+3. Move the frontend to a full React/Vite app once the standalone page becomes too large to maintain comfortably.
+4. Add authentication after local single-user workflows are mature.
 
 ## License
 

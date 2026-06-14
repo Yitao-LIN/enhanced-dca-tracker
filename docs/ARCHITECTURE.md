@@ -49,6 +49,8 @@ It can:
 - compute holdings locally;
 - let the user manually edit current market prices;
 - display total value, invested amount, gains, allocation, and DCA recommendation;
+- edit per-portfolio target allocations and show allocation drift;
+- show monthly contribution/activity and benchmark comparison analytics;
 - backfill daily and intraday market history for visible holdings and benchmarks;
 - hide securities from tracking without deleting their transactions;
 - delete all transactions for a ticker when an import needs to be redone.
@@ -88,6 +90,8 @@ DELETE /api/security-mappings
 GET    /api/hidden-securities
 PUT    /api/hidden-securities
 DELETE /api/hidden-securities
+GET    /api/allocation-targets
+PUT    /api/allocation-targets
 GET    /api/securities/search
 PUT    /api/market/prices
 GET    /api/market/{ticker}
@@ -96,6 +100,7 @@ GET    /api/market/history/{ticker}
 POST   /api/market/history/backfill
 POST   /api/market/intraday/backfill
 GET    /api/portfolio
+GET    /api/portfolio/analytics
 GET    /api/portfolio/history
 GET    /api/portfolio/history/intraday
 GET    /api/dca/settings
@@ -171,6 +176,7 @@ MarketHistoryBackfillRequest
 IntradayMarketBackfillRequest
 SecurityMappingIn
 HiddenSecurityIn
+AllocationTargetIn
 DcaSettingsIn
 DcaRequest
 ```
@@ -186,10 +192,12 @@ ImportSummaryOut
 SymbolSearchCandidateOut
 SecurityMappingOut
 HiddenSecurityOut
+AllocationTargetOut
 MarketPriceHistoryPointOut
 MarketHistoryBackfillOut
 IntradayMarketBackfillOut
 PortfolioSummaryOut
+PortfolioAnalyticsOut
 PortfolioHistoryPointOut
 PortfolioIntradayHistoryPointOut
 DcaSettingsOut
@@ -260,6 +268,7 @@ Alembic owns schema changes. The current migration chain creates:
 - import sessions;
 - security label mappings;
 - hidden securities;
+- allocation targets;
 - latest market prices;
 - daily historical market prices;
 - intraday historical market prices;
@@ -295,6 +304,7 @@ TransactionFingerprintRecord
 ImportSessionRecord
 SecurityMappingRecord
 HiddenSecurityRecord
+AllocationTargetRecord
 MarketPriceRecord
 MarketPriceHistoryRecord
 IntradayMarketPriceRecord
@@ -373,6 +383,18 @@ Important fields:
 - `ticker`
 - `created_at`
 
+`AllocationTargetRecord` stores editable target allocation percentages for one portfolio and ticker.
+
+Important fields:
+
+- `portfolio_record_id`
+- `ticker`
+- `target_percent`
+- `created_at`
+- `updated_at`
+
+The table is unique by portfolio and ticker. Target percentages must be between `0` and `100`; the total saved target can be less than or equal to `100`, with the remaining percentage reported as unassigned by analytics.
+
 `MarketPriceRecord` stores the latest known market price for each symbol.
 
 Important fields:
@@ -436,6 +458,7 @@ They know how to:
 - save import sessions;
 - save and load per-portfolio security label mappings;
 - save and load per-portfolio hidden securities;
+- replace and load per-portfolio allocation targets;
 - skip duplicate transaction imports;
 - delete all transactions for a ticker and clear its import fingerprints;
 - load database rows back into `Transaction` dataclasses;
@@ -473,6 +496,8 @@ upsert_security_mappings()
 list_hidden_securities()
 upsert_hidden_security()
 delete_hidden_security()
+list_allocation_targets()
+replace_allocation_targets()
 ```
 
 This keeps SQLAlchemy code out of `main.py` and out of the business calculation services.
@@ -544,6 +569,37 @@ The service also reduces the cost basis correctly after a sell.
 
 This is one of the core engines of the app.
 
+## Portfolio Analytics Service
+
+```text
+backend/app/services/portfolio_analytics.py
+```
+
+This file builds analytics from already-filtered visible transactions, the current portfolio summary, saved allocation targets, and daily portfolio history points.
+
+Main function:
+
+```python
+build_portfolio_analytics(transactions, summary, allocation_targets, history_points, benchmark_names)
+```
+
+It computes:
+
+- allocation drift by ticker;
+- target value at the current portfolio total;
+- buy or trim value needed to move toward target;
+- total target percent and unassigned target percent;
+- monthly buy contributions, sell proceeds, dividends, fees, and net cash flow;
+- benchmark comparison rows when portfolio history and benchmark history both exist.
+
+The service does not query the database. Routes load data through repositories, reuse `summarize_portfolio()` and `build_portfolio_history()`, and then pass plain domain objects into this service.
+
+Empty states are explicit:
+
+- an empty portfolio returns zero totals and empty analytics lists;
+- no saved targets keeps current allocation rows with `target_percent = null`;
+- missing benchmark history returns allocation and activity analytics with an empty benchmark comparison list.
+
 ## DCA Service
 
 ```text
@@ -614,6 +670,7 @@ Tests the pure business logic:
 - CSV parsing;
 - holdings after buy/sell;
 - portfolio summary;
+- portfolio analytics for allocation drift, monthly activity, and benchmark comparison;
 - DCA recommendation.
 
 ```text
@@ -634,7 +691,7 @@ Keeps the synthetic golden fixture dataset aligned with parser, portfolio summar
 tests/test_api_routes.py
 ```
 
-Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, ticker deletion/re-import, portfolio summary, market history, intraday market history, DCA settings, DCA recommendation, and validation errors.
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, market history, intraday market history, DCA settings, DCA recommendation, and validation errors.
 
 ## Current Data Flows
 
@@ -729,6 +786,37 @@ DELETE /api/hidden-securities?portfolio_id=default&ticker=CW8.PA
   -> list/upsert/delete HiddenSecurityRecord rows scoped to one portfolio
   -> portfolio summaries and histories filter these tickers out
   -> transactions remain persisted and duplicate detection remains intact
+```
+
+Allocation target management:
+
+```text
+GET /api/allocation-targets?portfolio_id=default
+PUT /api/allocation-targets?portfolio_id=default
+  -> validate ticker and target_percent values
+  -> total target percent must be <= 100
+  -> replace_allocation_targets()
+    -> ensure_portfolio()
+    -> delete previous targets for that portfolio only
+    -> insert normalized AllocationTargetRecord rows
+```
+
+Portfolio analytics:
+
+```text
+Frontend or API client
+  -> GET /api/portfolio/analytics?portfolio_id=default&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+    -> _visible_transactions()
+      -> hidden tickers filtered out
+    -> summarize_portfolio()
+    -> list_allocation_targets()
+      -> hidden target tickers filtered out for analytics
+    -> list_market_price_history() for visible holdings and default benchmarks
+    -> build_portfolio_history()
+    -> build_portfolio_analytics()
+      -> allocation drift and buy/trim values
+      -> monthly buy/sell/dividend/fee activity
+      -> benchmark comparison when history is complete enough
 ```
 
 Ticker transaction deletion:
@@ -861,7 +949,7 @@ domain.py
 
 defines the core financial concepts.
 
-That means SQLite can later become PostgreSQL without rewriting portfolio math. The DCA formula can also evolve without touching database code.
+That means SQLite can later become PostgreSQL without rewriting portfolio math. The DCA and analytics formulas can also evolve without touching database code.
 
 ## What Is Still Missing
 
@@ -869,8 +957,9 @@ The current architecture is a good foundation, but still early.
 
 Important next pieces:
 
-- richer allocation drift and contribution analytics;
-- broader route coverage as new API endpoints are added;
+- import hardening and reconciliation tools for real Fortuneo exports;
+- basic realized gain estimates and French tax/account reporting fields;
+- React/Vite migration once the standalone frontend becomes hard to maintain;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to add richer analytics once the local import workflow has been exercised with real exports.
+The best next technical step is probably to harden imports and reconciliation now that allocation, activity, and benchmark analytics exist.
