@@ -8,7 +8,7 @@ A personalized investment tracker for an Enhanced Dollar Cost Averaging workflow
 - summarize monthly investment activity and benchmark-relative returns;
 - track market prices manually or through a backend adapter for `yfinance`;
 - compute the next investment amount from market performance and volatility;
-- grow toward a React + FastAPI + PostgreSQL application.
+- run as a local React/Vite + FastAPI application, with SQLite today and PostgreSQL-compatible models for later.
 
 This repository now contains a working local prototype plus a backend service skeleton.
 
@@ -30,10 +30,15 @@ docs/TESTING.md
 .
 |-- docs/
 |   |-- ARCHITECTURE.md                # architecture and onboarding guide
+|   |-- RELEASE_CHECKLIST.md           # first-release readiness checklist
 |   `-- TESTING.md                     # test guide and expected outputs
-|-- index.html                         # redirects to the frontend prototype
+|-- index.html                         # local launcher note for the Vite frontend
 |-- frontend/
-|   `-- index.html                     # standalone React dashboard
+|   |-- index.html                     # Vite HTML shell
+|   |-- package.json                   # frontend scripts and dependencies
+|   `-- src/
+|       |-- main.jsx                   # React dashboard
+|       `-- styles.css                 # app styling
 |-- backend/
 |   |-- alembic.ini                    # migration config
 |   |-- alembic/                       # database migrations
@@ -54,6 +59,12 @@ docs/TESTING.md
 |           `-- market_data.py         # static and yfinance market providers
 |-- samples/
 |   `-- fortuneo_transactions_sample.csv
+|-- start_backend.bat                  # Windows backend launcher
+|-- start_backend.sh                   # Linux/WSL backend launcher
+|-- start_frontend.bat                 # Windows frontend launcher
+|-- start_frontend.sh                  # Linux/WSL frontend launcher
+|-- run_tests.bat                      # Windows test runner
+|-- run_tests.sh                       # Linux/WSL test runner
 `-- tests/
     |-- fixtures/                       # synthetic golden CSV/JSON data
     |-- test_api_routes.py              # FastAPI route tests
@@ -62,11 +73,34 @@ docs/TESTING.md
     `-- test_services.py
 ```
 
-## Frontend Demo
+## Frontend Setup
 
-Open `index.html` or `frontend/index.html` in a browser.
+The frontend is a Vite React app. Install Node.js LTS, then install frontend dependencies once:
 
-The frontend currently runs without a build step. It uses React from a CDN and includes:
+```powershell
+cd frontend
+npm install
+```
+
+Start the frontend from the repository root:
+
+```powershell
+.\start_frontend.bat
+```
+
+On Linux/WSL:
+
+```sh
+./start_frontend.sh
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
+The frontend includes:
 
 - demo Fortuneo-style transactions;
 - backend-persisted manual transaction entry with security search for buy, sell, dividend, fee, and cash outflow rows;
@@ -105,6 +139,16 @@ It serves FastAPI at `http://127.0.0.1:8000` and stores local testing data in `.
 
 ```powershell
 .\start_backend.bat 8766
+```
+
+On Linux/WSL:
+
+```sh
+cd backend
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+cd ..
+./start_backend.sh
 ```
 
 By default, FastAPI stores data in SQLite at:
@@ -192,6 +236,20 @@ $env:PYTHONPATH = "backend"
 python -m unittest discover -s tests
 ```
 
+Or run the full local check script:
+
+```powershell
+.\run_tests.bat
+```
+
+On Linux/WSL:
+
+```sh
+./run_tests.sh
+```
+
+The test runner executes Python unit/repository/API tests, a Python compile check, and a fresh SQLite Alembic migration smoke test. It also runs `npm run build` when Node dependencies are installed.
+
 Covered behavior:
 
 - Fortuneo-style semicolon CSV with French number formats;
@@ -211,6 +269,7 @@ Covered behavior:
 - persisted per-portfolio allocation targets.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
 - FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, portfolio analytics, allocation targets, DCA plans, market history, intraday history, hidden securities, deletion, and validation errors.
+- Vite frontend static checks for backend-only manual entry, CSV/ZIP import endpoints, security search, and app layout files.
 
 ## CSV Import Format
 
@@ -266,7 +325,7 @@ Saved DCA plans are named per portfolio. A plan recommendation returns a headlin
 
 1. Harden imports and add reconciliation tools against real Fortuneo exports.
 2. Add basic realized gain estimates and French tax/account reporting fields, especially PEA vs CTO.
-3. Move the frontend to a full React/Vite app once the standalone page becomes too large to maintain comfortably.
+3. Package the local release experience further, including sample data restore/reset and backup helpers.
 4. Add authentication after local single-user workflows are mature.
 
 ## License

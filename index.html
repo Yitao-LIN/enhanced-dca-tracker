@@ -3,7 +3,6 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta http-equiv="refresh" content="0; url=frontend/index.html" />
     <title>Enhanced DCA Investment Tracker</title>
     <style>
       body {
@@ -12,19 +11,44 @@
         display: grid;
         place-items: center;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #f3f4f6;
+        background: #eef2f6;
         color: #172033;
+      }
+
+      main {
+        width: min(720px, calc(100vw - 32px));
+        border: 1px solid #d7dee8;
+        border-radius: 8px;
+        padding: 28px;
+        background: #fff;
+        box-shadow: 0 16px 40px rgba(20, 32, 51, 0.08);
+      }
+
+      h1 {
+        margin: 0 0 10px;
+      }
+
+      p {
+        color: #53627a;
       }
 
       a {
         color: #185fa5;
       }
+
+      code {
+        border: 1px solid #d7dee8;
+        border-radius: 6px;
+        padding: 1px 5px;
+        background: #f7f9fc;
+      }
     </style>
   </head>
   <body>
     <main>
-      <p>Opening the tracker...</p>
-      <p><a href="frontend/index.html">Open the frontend manually</a></p>
+      <h1>Enhanced DCA Investment Tracker</h1>
+      <p>The frontend is a Vite app. Start it from the repository root with <code>.\start_frontend.bat</code> on Windows or <code>./start_frontend.sh</code> on Linux/WSL.</p>
+      <p>Then open <a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a>. Start the backend separately with <code>.\start_backend.bat</code> or <code>./start_backend.sh</code>.</p>
     </main>
   </body>
 </html>

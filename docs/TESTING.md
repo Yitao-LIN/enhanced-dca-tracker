@@ -12,7 +12,7 @@ Most commands assume you are at the repository root:
 cd "X:\My Finance\Tracker"
 ```
 
-Use the backend virtual environment:
+Use the backend virtual environment on Windows:
 
 ```powershell
 .\backend\.venv\Scripts\Activate.ps1
@@ -22,6 +22,17 @@ For Python imports, the backend package path must be available:
 
 ```powershell
 $env:PYTHONPATH = "backend"
+```
+
+On Linux/WSL:
+
+```sh
+cd /path/to/enhanced-dca-tracker
+cd backend
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements.txt
+cd ..
+export PYTHONPATH=backend
 ```
 
 ## Automated Tests
@@ -50,7 +61,8 @@ Purpose:
 - verify yfinance historical response normalization.
 - verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
 - verify FastAPI route contracts, response-model serialization, manual transaction behavior, preview/upload behavior, portfolio summaries, portfolio analytics, allocation targets, DCA plans, market history, intraday history, hidden securities, and validation errors.
-- verify the standalone frontend calls analytics endpoints and does not render demo analytics as backend data.
+- verify the Vite frontend source calls analytics endpoints and does not render demo analytics as backend data.
+- verify the Vite shell, stylesheet, backend-only manual transaction entry, security search, and CSV/ZIP import endpoints.
 
 Expected output:
 
@@ -99,8 +111,11 @@ test_backend_empty_history_does_not_render_demo_monthly_chart ... ok
 test_dca_strategy_ui_uses_plan_endpoints ... ok
 test_manual_transaction_entry_is_backend_only ... ok
 test_manual_transaction_keeps_fortuneo_import_available ... ok
+test_manual_transaction_ui_searches_security_mapping ... ok
 test_manual_transaction_ui_uses_backend_create_endpoint ... ok
 test_market_price_parser_keeps_dot_decimal_prices ... ok
+test_vite_frontend_has_release_layout_styles ... ok
+test_vite_frontend_mounts_react_app ... ok
 test_allocation_targets_replace_and_validate_per_portfolio ... ok
 test_dca_plans_are_persisted_per_portfolio_and_default_is_exclusive ... ok
 test_hidden_securities_are_persisted_per_portfolio ... ok
@@ -135,11 +150,13 @@ test_build_holdings_reduces_cost_basis_on_sell ... ok
 test_build_portfolio_history_with_normalized_benchmarks ... ok
 test_build_portfolio_intraday_history_with_normalized_benchmarks ... ok
 test_monthly_activity_groups_contributions_proceeds_dividends_and_fees ... ok
+test_portfolio_history_carries_forward_prior_prices_for_newer_transaction ... ok
 test_portfolio_history_starts_at_first_transaction ... ok
+test_portfolio_intraday_history_carries_forward_prior_ticks ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 83 tests
+Ran 87 tests
 
 OK
 ```
@@ -159,15 +176,37 @@ Purpose:
 - run the automated unit and repository tests;
 - run the Python compile check;
 - run a fresh SQLite Alembic migration smoke test;
+- run `npm run build` when Node.js and `frontend/node_modules` are available;
 - print the important paths, environment variables, commands, and migration inspection output for debugging.
 
 Expected final output:
 
 ```text
-[PASS] All automated checks passed.
+[PASS] All available automated checks passed.
 ```
 
-This script intentionally covers stable automated checks. Manual API and frontend smoke tests are still listed below, and the script should be updated when those checks become safe to automate.
+If npm or `frontend/node_modules` is unavailable, the frontend build check is skipped with an explicit `[SKIP]` line. Manual API and browser smoke tests are still listed below.
+
+## Linux/WSL Test Runner
+
+Run this from the repository root:
+
+```sh
+./run_tests.sh
+```
+
+Purpose:
+
+- run the same unit/repository/API tests as the Windows runner;
+- run the Python compile check;
+- run a fresh SQLite Alembic migration smoke test;
+- run `npm run build` when Node.js and `frontend/node_modules` are available.
+
+Expected final output:
+
+```text
+[PASS] All available automated checks passed.
+```
 
 ## Compile Check
 
@@ -481,27 +520,29 @@ The exact `updated` count depends on provider availability and market hours. If 
 Start the backend:
 
 ```powershell
-cd "X:\My Finance\Tracker\backend"
-.\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload
+cd "X:\My Finance\Tracker"
+.\start_backend.bat
 ```
 
-Serve the frontend from the repository root:
+Start the Vite frontend from another terminal:
 
 ```powershell
 cd "X:\My Finance\Tracker"
-python -m http.server 8001 --bind 127.0.0.1
+cd frontend
+npm install
+cd ..
+.\start_frontend.bat
 ```
 
 Open:
 
 ```text
-http://127.0.0.1:8001/frontend/index.html
+http://127.0.0.1:5173
 ```
 
 Purpose:
 
-- verify the browser can load the standalone frontend;
+- verify the browser can load the Vite frontend;
 - verify CORS allows the frontend to talk to the backend;
 - verify the page can connect to `/api/health`, `/api/portfolios`, `/api/accounts`, and `/api/portfolio`;
 - verify the analytics section calls `/api/allocation-targets` and `/api/portfolio/analytics`;
@@ -512,8 +553,8 @@ Purpose:
 
 Expected page behavior:
 
-- top-right status shows `Backend connected`;
-- transaction panel shows `Default Portfolio`;
+- sidebar status shows `Backend connected`;
+- the Transactions view shows `Default Portfolio`;
 - entering `AMUNDI MSCI WORLD` in the manual transaction `Search mapping` field and clicking `Search` returns ticker suggestions; clicking `Use` fills the manual transaction ticker.
 - filling the manual transaction form with date `2026-01-15`, type `Buy`, ticker `CW8.PA`, quantity `1`, price `470.50`, fees `1.95`, currency `EUR`, and account `PEA`, then clicking `Add transaction`, shows a status like:
 
@@ -530,7 +571,7 @@ Skipped duplicate transaction for CW8.PA.
 - choosing the sample CSV shows a preview status like:
 
 ```text
-Reviewed 4 row(s) from fortuneo_transactions_sample.csv: 4 new, 0 mapping(s), 0 duplicate(s), 0 error(s).
+Reviewed 4 row(s) from fortuneo_transactions_sample.csv.
 ```
 
 - clicking `Confirm import` then shows something like:
@@ -540,12 +581,12 @@ Imported 4 row(s), skipped 0 duplicate(s) from fortuneo_transactions_sample.csv.
 ```
 
 - for a Fortuneo bourse CSV or ZIP that has `libelle` but no `Code valeur`, preview shows `Map` rows; confirm each ticker suggestion before clicking `Confirm import`.
-- the Portfolio Analytics section shows editable target inputs, allocation drift, monthly activity, and benchmark comparison cards when backend data exists.
+- the Analytics view shows editable target inputs, allocation drift, monthly activity, and benchmark comparison cards when backend data exists.
 
 If the page says:
 
 ```text
-Imported 4 transaction rows from fortuneo_transactions_sample.csv in demo mode.
+Demo mode
 ```
 
 then the frontend is not connected to the backend. Check that FastAPI is running at `http://127.0.0.1:8000`, then click `Connect API`.
@@ -609,11 +650,13 @@ Run allocation target and portfolio analytics tests after changing:
 - `/api/allocation-targets`;
 - `/api/portfolio/analytics`;
 - `backend/app/services/portfolio_analytics.py`;
-- frontend analytics rendering in `frontend/index.html`.
+- frontend analytics rendering in `frontend/src/main.jsx`.
 
 Run frontend backend connection smoke tests after changing:
 
 - `frontend/index.html`;
+- `frontend/src/main.jsx`;
+- `frontend/src/styles.css`;
 - backend CORS config;
 - API route payloads used by the frontend.
 
@@ -623,7 +666,7 @@ Run manual transaction smoke checks after changing:
 - `/api/securities/search`;
 - `TransactionIn` or `TransactionCreateOut`;
 - transaction fingerprint behavior;
-- manual entry rendering or payload conversion in `frontend/index.html`.
+- manual entry rendering or payload conversion in `frontend/src/main.jsx`.
 
 ## Synthetic Fixture Dataset
 
@@ -685,7 +728,7 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 83 tests, OK
+Automated tests: 87 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works

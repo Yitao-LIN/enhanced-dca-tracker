@@ -8,6 +8,7 @@ set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 
 set "BACKEND_DIR=%ROOT%\backend"
+set "FRONTEND_DIR=%ROOT%\frontend"
 set "TESTS_DIR=%ROOT%\tests"
 set "LOCAL_DIR=%ROOT%\.local"
 set "PYTHON=%BACKEND_DIR%\.venv\Scripts\python.exe"
@@ -22,6 +23,7 @@ echo  Investment Tracker Test Runner
 echo ============================================================
 echo [INFO] Repository root : %ROOT%
 echo [INFO] Backend dir     : %BACKEND_DIR%
+echo [INFO] Frontend dir    : %FRONTEND_DIR%
 echo [INFO] Tests dir       : %TESTS_DIR%
 echo [INFO] Python          : %PYTHON%
 echo [INFO] Alembic         : %ALEMBIC%
@@ -53,20 +55,20 @@ if not exist "%LOCAL_DIR%" (
 
 set "PYTHONPATH=%BACKEND_DIR%"
 
-call :section "1/3 Unit and repository tests"
+call :section "1/4 Unit and repository tests"
 echo [ENV] PYTHONPATH=%PYTHONPATH%
 echo [CMD] "%PYTHON%" -m unittest discover -s "%TESTS_DIR%" -v
 "%PYTHON%" -m unittest discover -s "%TESTS_DIR%" -v 2>&1
 if errorlevel 1 goto :fail
 echo [PASS] Unit and repository tests completed.
 
-call :section "2/3 Python compile check"
+call :section "2/4 Python compile check"
 echo [CMD] "%PYTHON%" -m compileall "%BACKEND_DIR%\app" "%BACKEND_DIR%\alembic" "%TESTS_DIR%"
 "%PYTHON%" -m compileall "%BACKEND_DIR%\app" "%BACKEND_DIR%\alembic" "%TESTS_DIR%" 2>&1
 if errorlevel 1 goto :fail
 echo [PASS] Compile check completed.
 
-call :section "3/3 Alembic fresh database migration smoke test"
+call :section "3/4 Alembic fresh database migration smoke test"
 if exist "%TEST_DB%" (
   echo [INFO] Removing previous smoke database: %TEST_DB%
   del /f /q "%TEST_DB%"
@@ -84,8 +86,21 @@ echo [CMD] Inspect migration revision and expected tables
 if errorlevel 1 goto :fail
 echo [PASS] Alembic migration smoke test completed.
 
+call :section "4/4 Frontend build check"
+where npm >nul 2>nul
+if errorlevel 1 (
+  echo [SKIP] npm was not found on PATH. Install Node.js and run npm install in frontend to enable this check.
+) else if not exist "%FRONTEND_DIR%\node_modules" (
+  echo [SKIP] frontend\node_modules was not found. Run npm install in frontend to enable this check.
+) else (
+  echo [CMD] npm --prefix "%FRONTEND_DIR%" run build
+  npm --prefix "%FRONTEND_DIR%" run build 2>&1
+  if errorlevel 1 goto :fail
+  echo [PASS] Frontend build completed.
+)
+
 call :section "Summary"
-echo [PASS] All automated checks passed.
+echo [PASS] All available automated checks passed.
 echo [INFO] Manual/API/frontend smoke tests are documented in docs\TESTING.md.
 exit /b 0
 

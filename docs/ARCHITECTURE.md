@@ -7,8 +7,8 @@ This guide explains how the project is organized and how data moves through the 
 The project currently has two main parts:
 
 ```text
-frontend/index.html
-    Browser UI prototype
+frontend/
+    Vite React browser UI
 
 backend/app/
     FastAPI API
@@ -34,14 +34,16 @@ This separation matters because portfolio math, CSV parsing, and DCA logic shoul
 
 ```text
 frontend/index.html
+frontend/src/main.jsx
+frontend/src/styles.css
 ```
 
-The frontend is currently a standalone React prototype loaded from a CDN. It does not need a Node build step yet.
+The frontend is a Vite React app. Run `npm install` in `frontend/`, then start it with `start_frontend.bat` on Windows or `start_frontend.sh` on Linux/WSL. The app is served at `http://127.0.0.1:5173`.
 
 It can:
 
 - load demo Fortuneo-like CSV data;
-- import a CSV file in the browser;
+- provide a sidebar workflow for portfolio, transactions, analytics, DCA strategy, and settings;
 - connect to the FastAPI backend at `http://127.0.0.1:8000`;
 - load portfolios, accounts, and portfolio summaries from the API;
 - add one backend-persisted manual transaction at a time, with ticker search through the security search endpoint;
@@ -62,7 +64,7 @@ If the backend is unavailable, the frontend falls back to demo mode and computes
 index.html
 ```
 
-The root `index.html` is a tiny redirect page that opens `frontend/index.html`.
+The root `index.html` is a small launcher note that points developers to the Vite frontend URL. Opening `frontend/index.html` directly is not the supported workflow because Vite transforms the React source during development and build.
 
 ## Backend Entry Point
 
@@ -721,6 +723,45 @@ tests/test_api_routes.py
 
 Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover manual transaction creation and validation, preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, market history, intraday market history, DCA plans, DCA recommendations, and validation errors.
 
+```text
+tests/test_frontend_static.py
+```
+
+Checks release-sensitive frontend source contracts without launching a browser: the Vite shell, app layout stylesheet, backend-only manual transaction entry, security search, CSV/ZIP import endpoints, analytics endpoints, DCA plan endpoints, and demo-mode boundaries.
+
+## Development Workflow
+
+For local backend work:
+
+```text
+Windows:   .\start_backend.bat
+Linux/WSL: ./start_backend.sh
+```
+
+For local frontend work:
+
+```text
+cd frontend
+npm install
+Windows:   ..\start_frontend.bat
+Linux/WSL: ../start_frontend.sh
+```
+
+Before opening a release PR or tag, run:
+
+```text
+Windows:   .\run_tests.bat
+Linux/WSL: ./run_tests.sh
+```
+
+After modifying code, update the matching layer:
+
+- backend API contracts: update `backend/app/schemas.py`, route tests in `tests/test_api_routes.py`, and architecture/API docs;
+- service behavior: update service tests in `tests/test_services.py` and fixture tests if golden data changes;
+- persistence models or migrations: add Alembic migrations, repository tests, and migration smoke notes;
+- frontend behavior: update `frontend/src/main.jsx`, `frontend/src/styles.css`, and `tests/test_frontend_static.py`;
+- user-facing workflow changes: update `README.md`, `docs/TESTING.md`, and `docs/RELEASE_CHECKLIST.md`.
+
 ## Current Data Flows
 
 Manual transaction entry:
@@ -947,6 +988,8 @@ GET /api/portfolio/history
     -> invested, value, gain, S&P 500, Nasdaq 100 series
 ```
 
+`build_portfolio_history()` carries forward the latest quote on or before the first visible timeline date for each holding and benchmark. This matters for manual transactions entered after the latest available `yfinance` daily row, such as weekend or same-day entries: the chart can still show performance from the most recent stored market close instead of rendering blank.
+
 Intraday portfolio history:
 
 ```text
@@ -957,6 +1000,8 @@ GET /api/portfolio/history/intraday
   -> build_portfolio_intraday_history()
     -> timestamped invested, value, gain, S&P 500, Nasdaq 100 series
 ```
+
+`build_portfolio_intraday_history()` uses the same carry-forward rule at timestamp granularity. A visible benchmark or holding tick can seed the timeline, and the latest prior price for the other series is reused until a newer tick appears.
 
 DCA plan recommendation:
 
@@ -1012,7 +1057,7 @@ Important next pieces:
 
 - import hardening and reconciliation tools for real Fortuneo exports;
 - basic realized gain estimates and French tax/account reporting fields;
-- React/Vite migration once the standalone frontend becomes hard to maintain;
+- frontend component extraction and usability polish now that the app is on Vite;
 - authentication later, once the local portfolio workflow feels right.
 
-The best next technical step is probably to harden imports and reconciliation now that allocation, activity, and benchmark analytics exist.
+The best next technical step is probably to harden imports and reconciliation now that manual entry, allocation, activity, benchmark analytics, and the Vite frontend are in place.

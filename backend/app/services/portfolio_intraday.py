@@ -39,8 +39,9 @@ def build_portfolio_intraday_history(
     if not timeline:
         return []
 
-    last_prices: dict[str, Decimal] = {}
-    last_benchmarks: dict[str, Decimal] = {}
+    first_timestamp = timeline[0]
+    last_prices = _latest_prices_on_or_before(prices_by_symbol, first_timestamp)
+    last_benchmarks = _latest_prices_on_or_before(benchmarks_by_symbol, first_timestamp)
     benchmark_base_prices: dict[str, Decimal] = {}
     benchmark_base_value: Decimal | None = None
     points: list[PortfolioIntradayPoint] = []
@@ -110,6 +111,18 @@ def _update_last_prices(
     for symbol, history in history_by_symbol.items():
         if timestamp in history:
             last_prices[symbol] = history[timestamp]
+
+
+def _latest_prices_on_or_before(
+    history_by_symbol: dict[str, dict[datetime, Decimal]],
+    timestamp: datetime,
+) -> dict[str, Decimal]:
+    prices = {}
+    for symbol, history in history_by_symbol.items():
+        prior_timestamps = [price_at for price_at in history if price_at <= timestamp]
+        if prior_timestamps:
+            prices[symbol] = history[max(prior_timestamps)]
+    return prices
 
 
 def _normalized_benchmarks(

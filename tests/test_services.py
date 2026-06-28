@@ -226,6 +226,33 @@ class PortfolioTests(unittest.TestCase):
 
         self.assertEqual([point.price_date for point in history], [date(2026, 6, 4), date(2026, 6, 5)])
 
+    def test_portfolio_history_carries_forward_prior_prices_for_newer_transaction(self):
+        transactions = [
+            Transaction(
+                transaction_date=date(2026, 6, 28),
+                ticker="PSP5.PA",
+                transaction_type=TransactionType.BUY,
+                quantity=Decimal("5"),
+                price=Decimal("57.20"),
+            )
+        ]
+
+        history = build_portfolio_history(
+            transactions,
+            prices_by_symbol={"PSP5.PA": {date(2026, 6, 26): Decimal("56.77")}},
+            benchmarks_by_symbol={
+                "^GSPC": {date(2026, 6, 26): Decimal("7354.02")},
+                "^NDX": {date(2026, 6, 26): Decimal("29118.24")},
+            },
+            start_date=date(2026, 5, 29),
+            end_date=date(2026, 6, 28),
+        )
+
+        self.assertEqual([point.price_date for point in history], [date(2026, 6, 28)])
+        self.assertEqual(history[0].market_value, Decimal("283.85"))
+        self.assertEqual(history[0].benchmarks["^GSPC"], Decimal("283.85"))
+        self.assertEqual(history[0].benchmarks["^NDX"], Decimal("283.85"))
+
     def test_build_portfolio_intraday_history_with_normalized_benchmarks(self):
         transactions = [
             Transaction(
@@ -252,6 +279,31 @@ class PortfolioTests(unittest.TestCase):
         self.assertEqual(history[0].market_value, Decimal("112.00"))
         self.assertEqual(history[1].market_value, Decimal("114.00"))
         self.assertEqual(history[1].benchmarks["^GSPC"], Decimal("113.12"))
+
+    def test_portfolio_intraday_history_carries_forward_prior_ticks(self):
+        transactions = [
+            Transaction(
+                transaction_date=date(2026, 6, 28),
+                ticker="PSP5.PA",
+                transaction_type=TransactionType.BUY,
+                quantity=Decimal("5"),
+                price=Decimal("57.20"),
+            )
+        ]
+        prior_tick = datetime(2026, 6, 27, 16, 0)
+        visible_tick = datetime(2026, 6, 28, 9, 0)
+
+        history = build_portfolio_intraday_history(
+            transactions,
+            prices_by_symbol={"PSP5.PA": {prior_tick: Decimal("56.77")}},
+            benchmarks_by_symbol={"^GSPC": {visible_tick: Decimal("7354.02")}},
+            start_at=visible_tick,
+            end_at=visible_tick,
+        )
+
+        self.assertEqual([point.timestamp for point in history], [visible_tick])
+        self.assertEqual(history[0].market_value, Decimal("283.85"))
+        self.assertEqual(history[0].benchmarks["^GSPC"], Decimal("283.85"))
 
 
 class PortfolioAnalyticsTests(unittest.TestCase):
