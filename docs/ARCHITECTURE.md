@@ -44,6 +44,7 @@ It can:
 - import a CSV file in the browser;
 - connect to the FastAPI backend at `http://127.0.0.1:8000`;
 - load portfolios, accounts, and portfolio summaries from the API;
+- add one backend-persisted manual transaction at a time, with ticker search through the security search endpoint;
 - preview Fortuneo CSV rows through the backend before confirming import;
 - save manually edited market prices through the API;
 - compute holdings locally;
@@ -718,9 +719,27 @@ Keeps the synthetic golden fixture dataset aligned with parser, portfolio summar
 tests/test_api_routes.py
 ```
 
-Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, market history, intraday market history, DCA plans, DCA recommendations, and validation errors.
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover manual transaction creation and validation, preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, market history, intraday market history, DCA plans, DCA recommendations, and validation errors.
 
 ## Current Data Flows
+
+Manual transaction entry:
+
+```text
+Frontend or API client
+  -> POST /api/transactions
+    -> TransactionIn validation
+    -> Transaction dataclass
+      -> add_transaction()
+        -> ensure_portfolio()
+        -> ensure_account()
+        -> transaction_fingerprint()
+        -> skip exact duplicate already in SQLite
+        -> SQLite transactions table
+        -> SQLite transaction_fingerprints table
+```
+
+The frontend exposes one-row manual entry only when FastAPI is connected. The manual form can search `/api/securities/search` by security name, ISIN, or ticker, then fill the selected ticker before saving. Buy and sell rows send quantity, price, and fees directly. Dividend rows use quantity `1` and price equal to the dividend amount. Fee and cash-outflow rows store the amount in `fees` because the current ledger model treats both as cash outflows.
 
 CSV upload:
 

@@ -62,6 +62,8 @@
 
       input[type="number"],
       input[type="text"],
+      input[type="date"],
+      textarea,
       select {
         width: 100%;
         border: 1px solid var(--line);
@@ -70,6 +72,12 @@
         padding: 0 10px;
         background: var(--surface);
         color: var(--text);
+      }
+
+      textarea {
+        min-height: 74px;
+        padding: 9px 10px;
+        resize: vertical;
       }
 
       .app {
@@ -170,6 +178,24 @@
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
+      }
+
+      .manual-form {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .manual-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .manual-grid .full {
+        grid-column: 1 / -1;
       }
 
       .actions {
@@ -654,6 +680,7 @@
         .workbench,
         .analytics-layout,
         .controls,
+        .manual-grid,
         .summary-row {
           grid-template-columns: 1fr;
         }
@@ -1007,6 +1034,22 @@
         return `${value >= 0 ? "+" : ""}${money(value)}`;
       }
 
+      /** @brief Build the editable draft for one backend-persisted manual transaction. */
+      function defaultManualTransactionDraft() {
+        return {
+          transaction_date: isoDate(new Date()),
+          transaction_type: "buy",
+          ticker: "",
+          quantity: "",
+          price: "",
+          amount: "",
+          fees: "0",
+          currency: "EUR",
+          account: "",
+          description: "",
+        };
+      }
+
       /** @brief Build the local draft for a new unsaved DCA plan. */
       function defaultDcaDraft(portfolioId = "default") {
         return {
@@ -1337,6 +1380,10 @@
         const [mappingEditorOpen, setMappingEditorOpen] = useState(false);
         const [mappingDrafts, setMappingDrafts] = useState({});
         const [newMapping, setNewMapping] = useState({ security_label: "", ticker: "" });
+        const [manualDraft, setManualDraft] = useState(() => defaultManualTransactionDraft());
+        const [manualSearchQuery, setManualSearchQuery] = useState("");
+        const [manualSearchResults, setManualSearchResults] = useState([]);
+        const [manualSearchStatus, setManualSearchStatus] = useState("");
         const [status, setStatus] = useState("Demo mode loaded. Start FastAPI on port 8000 to sync with the backend.");
 
         const demoHoldings = useMemo(() => buildHoldings(transactions, prices), [transactions, prices]);
@@ -1365,6 +1412,8 @@
         const unresolvedMappingCount = mappingGroups.length - confirmedMappingGroups.length;
         const confirmImportDisabledReason = getConfirmImportDisabledReason();
         const canConfirmImport = !confirmImportDisabledReason;
+        const manualTransactionDisabledReason = getManualTransactionDisabledReason();
+        const canSaveManualTransaction = !manualTransactionDisabledReason;
         const previewOutcome = getPreviewOutcome();
 
         const history = useMemo(() => {
@@ -1801,6 +1850,10 @@
             setDcaPlans([]);
             setSelectedDcaPlanId("");
             setDcaDraft(defaultDcaDraft(selectedPortfolioId));
+            setManualDraft(defaultManualTransactionDraft());
+            setManualSearchQuery("");
+            setManualSearchResults([]);
+            setManualSearchStatus("");
             setStatus("Backend unavailable. Demo mode is active.");
           } finally {
             setApiLoading(false);
@@ -1906,7 +1959,112 @@
             setDcaPlans([]);
             setSelectedDcaPlanId("");
             setDcaDraft(defaultDcaDraft(portfolioId));
+            setManualDraft(defaultManualTransactionDraft());
+            setManualSearchQuery("");
+            setManualSearchResults([]);
+            setManualSearchStatus("");
             setStatus(`Backend sync failed: ${error.message}`);
+          } finally {
+            setApiLoading(false);
+          }
+        }
+
+        function updateManualDraft(field, value) {
+          setManualDraft((current) => ({
+            ...current,
+            [field]: field === "ticker" || field === "currency" ? String(value || "").toUpperCase() : value,
+            ...(field === "transaction_type" ? { quantity: "", price: "", amount: "", fees: "0" } : {}),
+          }));
+        }
+
+        async function searchManualTransactionMapping() {
+          const query = String(manualSearchQuery || manualDraft.description || manualDraft.ticker || "").trim();
+          if (!query) {
+            setManualSearchStatus("Enter a security name, ISIN, or ticker to search.");
+            return;
+          }
+          setManualSearchStatus("Searching...");
+          try {
+            const results = await apiRequest(`/api/securities/search?query=${encodeURIComponent(query)}&limit=10`);
+            setManualSearchResults(results);
+            if (results[0] && !String(manualDraft.ticker || "").trim()) {
+              updateManualDraft("ticker", results[0].symbol);
+            }
+            setManualSearchStatus(results.length ? `Found ${results.length} result(s) for ${query}.` : `No results for ${query}.`);
+          } catch (error) {
+            setManualSearchStatus(`Search failed: ${error.message}`);
+          }
+        }
+
+        function useManualSearchResult(result) {
+          updateManualDraft("ticker", result.symbol);
+          if (!String(manualDraft.description || "").trim() && result.name) {
+            updateManualDraft("description", result.name);
+          }
+          setManualSearchStatus(`Selected ${result.symbol}.`);
+        }
+
+        function getManualTransactionDisabledReason() {
+          if (!apiAvailable) return "Connect API to add manual transactions.";
+          if (!manualDraft.transaction_date) return "Choose a transaction date.";
+          if (!String(manualDraft.ticker || "").trim()) return "Enter a ticker.";
+          const fees = parseNumber(manualDraft.fees);
+          if (fees < 0) return "Fees must be zero or greater.";
+          if (manualDraft.transaction_type === "buy" || manualDraft.transaction_type === "sell") {
+            if (parseNumber(manualDraft.quantity) <= 0) return "Enter a quantity greater than zero.";
+            if (parseNumber(manualDraft.price) <= 0) return "Enter a price greater than zero.";
+            return "";
+          }
+          const amount = parseNumber(manualDraft.amount);
+          if (amount <= 0) return "Enter an amount greater than zero.";
+          return "";
+        }
+
+        function manualTransactionPayload() {
+          const type = manualDraft.transaction_type;
+          const amount = parseNumber(manualDraft.amount);
+          const trade = type === "buy" || type === "sell";
+          return {
+            portfolio_id: selectedPortfolioId,
+            transaction_date: manualDraft.transaction_date,
+            ticker: String(manualDraft.ticker || "").trim().toUpperCase(),
+            transaction_type: type,
+            quantity: trade ? parseNumber(manualDraft.quantity) : type === "dividend" ? 1 : 0,
+            price: trade ? parseNumber(manualDraft.price) : type === "dividend" ? amount : 0,
+            fees: type === "fee" || type === "cash" ? amount : parseNumber(manualDraft.fees),
+            currency: String(manualDraft.currency || "EUR").trim().toUpperCase(),
+            account: String(manualDraft.account || "").trim() || null,
+            description: String(manualDraft.description || "").trim() || null,
+          };
+        }
+
+        async function saveManualTransaction(event) {
+          event.preventDefault();
+          const disabledReason = getManualTransactionDisabledReason();
+          if (disabledReason) {
+            setStatus(disabledReason);
+            return;
+          }
+          const payload = manualTransactionPayload();
+          setApiLoading(true);
+          try {
+            const result = await apiRequest("/api/transactions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            await refreshBackendData(selectedPortfolioId, { autoBackfill: true });
+            setManualDraft((current) => ({
+              ...defaultManualTransactionDraft(),
+              currency: current.currency || "EUR",
+              account: current.account || "",
+            }));
+            setManualSearchQuery("");
+            setManualSearchResults([]);
+            setManualSearchStatus("");
+            setStatus(result.created ? `Added ${payload.transaction_type} transaction for ${payload.ticker}.` : `Skipped duplicate transaction for ${payload.ticker}.`);
+          } catch (error) {
+            setStatus(`Manual transaction failed: ${error.message}`);
           } finally {
             setApiLoading(false);
           }
@@ -2285,6 +2443,129 @@
           setVolatility(Number((15 + Math.random() * 18).toFixed(1)));
         }
 
+        function renderManualTransactionForm() {
+          const trade = manualDraft.transaction_type === "buy" || manualDraft.transaction_type === "sell";
+          const amountLabel = manualDraft.transaction_type === "dividend"
+            ? "Dividend amount"
+            : manualDraft.transaction_type === "fee"
+              ? "Fee amount"
+              : "Cash outflow";
+          return (
+            <form className="manual-form" onSubmit={saveManualTransaction}>
+              <div className="toolbar">
+                <h3>Manual transaction</h3>
+                <button className="primary" type="submit" disabled={!canSaveManualTransaction || apiLoading}>Add transaction</button>
+              </div>
+              <div className="manual-grid">
+                <div>
+                  <label htmlFor="manual-date">Date</label>
+                  <input id="manual-date" type="date" value={manualDraft.transaction_date} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("transaction_date", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="manual-type">Type</label>
+                  <select id="manual-type" value={manualDraft.transaction_type} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("transaction_type", event.target.value)}>
+                    <option value="buy">Buy</option>
+                    <option value="sell">Sell</option>
+                    <option value="dividend">Dividend</option>
+                    <option value="fee">Fee</option>
+                    <option value="cash">Cash outflow</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="manual-ticker">Ticker</label>
+                  <input id="manual-ticker" type="text" value={manualDraft.ticker} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("ticker", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="manual-search">Search mapping</label>
+                  <div className="mapping-search" style={{ marginTop: 0 }}>
+                    <input
+                      id="manual-search"
+                      type="text"
+                      value={manualSearchQuery}
+                      disabled={!apiAvailable || apiLoading}
+                      placeholder="Security name, ISIN, or ticker"
+                      onChange={(event) => setManualSearchQuery(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          searchManualTransactionMapping();
+                        }
+                      }}
+                    />
+                    <button type="button" disabled={!apiAvailable || apiLoading || !String(manualSearchQuery || manualDraft.description || manualDraft.ticker || "").trim()} onClick={searchManualTransactionMapping}>Search</button>
+                  </div>
+                </div>
+                {(manualSearchStatus || manualSearchResults.length > 0) && (
+                  <div className="full">
+                    {manualSearchStatus && <div className="mapping-note">{manualSearchStatus}</div>}
+                    {manualSearchResults.length > 0 && (
+                      <div className="suggestion-list">
+                        {manualSearchResults.map((result) => {
+                          const market = [result.exchange, result.currency, result.quote_type].filter(Boolean).join(" / ") || "-";
+                          return (
+                            <div className="suggestion-row" key={`manual-${result.symbol}`}>
+                              <strong>{result.symbol}</strong>
+                              <span title={result.name || result.source}>{result.name || result.source}</span>
+                              <span title={market}>{market}</span>
+                              <button type="button" onClick={() => useManualSearchResult(result)}>Use</button>
+                              <div className="suggestion-source">{result.source || "manual search result"}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div>
+                  <label htmlFor="manual-currency">Currency</label>
+                  <input id="manual-currency" type="text" value={manualDraft.currency} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("currency", event.target.value)} />
+                </div>
+                {trade ? (
+                  <>
+                    <div>
+                      <label htmlFor="manual-quantity">Quantity</label>
+                      <input id="manual-quantity" type="text" value={manualDraft.quantity} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("quantity", event.target.value)} />
+                    </div>
+                    <div>
+                      <label htmlFor="manual-price">Price</label>
+                      <input id="manual-price" type="text" value={manualDraft.price} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("price", event.target.value)} />
+                    </div>
+                    <div>
+                      <label htmlFor="manual-fees">Fees</label>
+                      <input id="manual-fees" type="text" value={manualDraft.fees} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("fees", event.target.value)} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label htmlFor="manual-amount">{amountLabel}</label>
+                      <input id="manual-amount" type="text" value={manualDraft.amount} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("amount", event.target.value)} />
+                    </div>
+                    {manualDraft.transaction_type === "dividend" && (
+                      <div>
+                        <label htmlFor="manual-fees">Fees</label>
+                        <input id="manual-fees" type="text" value={manualDraft.fees} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("fees", event.target.value)} />
+                      </div>
+                    )}
+                  </>
+                )}
+                <div>
+                  <label htmlFor="manual-account">Account</label>
+                  <input id="manual-account" type="text" list="manual-account-options" value={manualDraft.account} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("account", event.target.value)} />
+                  <datalist id="manual-account-options">
+                    {accounts.map((account) => <option key={account.id} value={account.name} />)}
+                  </datalist>
+                </div>
+                <div className="full">
+                  <label htmlFor="manual-description">Description</label>
+                  <textarea id="manual-description" value={manualDraft.description} disabled={!apiAvailable || apiLoading} onChange={(event) => updateManualDraft("description", event.target.value)} />
+                </div>
+              </div>
+              {manualTransactionDisabledReason && <p className="mapping-note">{manualTransactionDisabledReason}</p>}
+            </form>
+          );
+        }
+
         /** @brief Render current allocation bars with optional target markers. */
         function renderDriftBars() {
           if (!analyticsRows.length) {
@@ -2506,7 +2787,7 @@
               <div className="actions">
                 <span className="pill">{apiAvailable ? "Backend connected" : "Demo mode"}</span>
                 <button disabled={apiLoading} onClick={connectBackend}>{apiAvailable ? "Sync API" : "Connect API"}</button>
-                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setHiddenSecurities([]); setAllocationTargets([]); setPortfolioAnalytics(emptyPortfolioAnalytics); setTargetDrafts({}); setNewTarget({ ticker: "", target_percent: "" }); setDcaPlans([]); setSelectedDcaPlanId(""); setDcaDraft(defaultDcaDraft(selectedPortfolioId)); setApiDca(null); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
+                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setHiddenSecurities([]); setAllocationTargets([]); setPortfolioAnalytics(emptyPortfolioAnalytics); setTargetDrafts({}); setNewTarget({ ticker: "", target_percent: "" }); setDcaPlans([]); setSelectedDcaPlanId(""); setDcaDraft(defaultDcaDraft(selectedPortfolioId)); setManualDraft(defaultManualTransactionDraft()); setApiDca(null); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
                 <button className="primary" onClick={simulateMarket}>Refresh market simulation</button>
               </div>
             </header>
@@ -2660,7 +2941,7 @@
 
               <aside className="stack">
                 <div className="panel">
-                  <h2>Fortuneo Import</h2>
+                  <h2>Transactions</h2>
                   <div style={{ marginTop: 12 }}>
                     <label htmlFor="portfolio">Portfolio</label>
                     <select
@@ -2677,7 +2958,9 @@
                   {apiAvailable && (
                     <p className="status">{accounts.length ? `${accounts.length} account(s): ${accounts.map((account) => account.name).join(", ")}` : "No accounts yet for this portfolio."}</p>
                   )}
+                  {renderManualTransactionForm()}
                   <div className="drop" style={{ marginTop: 12 }}>
+                    <h3 style={{ marginBottom: 10 }}>Fortuneo CSV/ZIP</h3>
                     <label htmlFor="csv">CSV file</label>
                     <input className="file" id="csv" type="file" accept=".csv,.zip,text/csv,application/zip" disabled={apiLoading} onChange={importFile} />
                   </div>

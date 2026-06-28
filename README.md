@@ -69,6 +69,7 @@ Open `index.html` or `frontend/index.html` in a browser.
 The frontend currently runs without a build step. It uses React from a CDN and includes:
 
 - demo Fortuneo-style transactions;
+- backend-persisted manual transaction entry with security search for buy, sell, dividend, fee, and cash outflow rows;
 - CSV preview and confirmed upload when FastAPI is running;
 - editable current prices;
 - portfolio metrics and holdings table;
@@ -180,7 +181,7 @@ DELETE /api/dca/plans/{plan_id}
 POST   /api/dca/plans/{plan_id}/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, hidden securities, allocation targets, DCA plans, latest market prices, daily market price history, and intraday market price history. CSV imports skip duplicate transactions and return an import summary.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, hidden securities, allocation targets, DCA plans, latest market prices, daily market price history, and intraday market price history. Manual transaction entry and CSV imports both use transaction fingerprints to skip exact duplicates. CSV imports also return an import summary.
 
 ## Run Automated Tests
 
@@ -194,6 +195,7 @@ python -m unittest discover -s tests
 Covered behavior:
 
 - Fortuneo-style semicolon CSV with French number formats;
+- manual transaction creation, validation, duplicate detection, and amount-style dividend/fee/cash rows;
 - buy/sell cost-basis handling;
 - portfolio value and return calculations;
 - target allocation drift, monthly activity, and benchmark comparison analytics.

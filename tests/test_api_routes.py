@@ -170,6 +170,115 @@ class ApiRouteTests(unittest.TestCase):
             },
         )
 
+    def test_manual_buy_creates_account_summary_and_reports_duplicates(self):
+        payload = {
+            "portfolio_id": "default",
+            "transaction_date": "2026-05-31",
+            "ticker": "cw8.pa",
+            "transaction_type": "buy",
+            "quantity": "2",
+            "price": "100",
+            "fees": "1.50",
+            "currency": "eur",
+            "account": "PEA",
+            "description": "Manual buy",
+        }
+
+        created = self.client.post("/api/transactions", json=payload)
+        duplicate = self.client.post("/api/transactions", json=payload)
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json(), {"created": True, "count": 1})
+        self.assertEqual(duplicate.status_code, 200)
+        self.assertEqual(duplicate.json(), {"created": False, "count": 1})
+
+        transactions = self.client.get("/api/transactions?portfolio_id=default")
+        self.assertEqual(len(transactions.json()), 1)
+        self.assertEqual(transactions.json()[0]["ticker"], "CW8.PA")
+        self.assertEqual(transactions.json()[0]["description"], "Manual buy")
+
+        accounts = self.client.get("/api/accounts?portfolio_id=default")
+        self.assertEqual([account["name"] for account in accounts.json()], ["PEA"])
+
+        summary = self.client.get("/api/portfolio?portfolio_id=default")
+        self.assertEqual(summary.status_code, 200)
+        self.assertDecimalEqual(summary.json()["total_value"], "201.50")
+        self.assertDecimalEqual(summary.json()["total_invested"], "201.50")
+        self.assertDecimalEqual(summary.json()["cash_flow"], "-201.50")
+
+    def test_manual_transaction_validation_rejects_invalid_payloads(self):
+        valid = {
+            "portfolio_id": "default",
+            "transaction_date": "2026-05-31",
+            "ticker": "CW8.PA",
+            "transaction_type": "buy",
+            "quantity": "1",
+            "price": "100",
+            "fees": "0",
+            "currency": "EUR",
+        }
+
+        invalid_cases = [
+            ("type", {**valid, "transaction_type": "bonus"}),
+            ("ticker", {**valid, "ticker": "   "}),
+            ("quantity", {**valid, "quantity": "-1"}),
+            ("price", {**valid, "price": "-1"}),
+            ("fees", {**valid, "fees": "-1"}),
+        ]
+        for name, payload in invalid_cases:
+            with self.subTest(name=name):
+                response = self.client.post("/api/transactions", json=payload)
+                self.assertEqual(response.status_code, 422)
+
+    def test_manual_amount_style_transactions_are_accepted(self):
+        rows = [
+            {
+                "transaction_date": "2026-06-01",
+                "ticker": "CW8.PA",
+                "transaction_type": "dividend",
+                "quantity": "1",
+                "price": "12",
+                "fees": "2",
+                "currency": "EUR",
+                "account": "PEA",
+                "description": "Manual dividend",
+            },
+            {
+                "transaction_date": "2026-06-02",
+                "ticker": "CW8.PA",
+                "transaction_type": "fee",
+                "quantity": "0",
+                "price": "0",
+                "fees": "3",
+                "currency": "EUR",
+                "account": "PEA",
+                "description": "Manual fee",
+            },
+            {
+                "transaction_date": "2026-06-03",
+                "ticker": "CASH",
+                "transaction_type": "cash",
+                "quantity": "0",
+                "price": "0",
+                "fees": "50",
+                "currency": "EUR",
+                "account": "PEA",
+                "description": "Manual cash outflow",
+            },
+        ]
+
+        for payload in rows:
+            response = self.client.post("/api/transactions", json=payload)
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["created"])
+
+        transactions = self.client.get("/api/transactions?portfolio_id=default")
+        self.assertEqual([row["transaction_type"] for row in transactions.json()], ["dividend", "fee", "cash"])
+        self.assertEqual([row["description"] for row in transactions.json()], ["Manual dividend", "Manual fee", "Manual cash outflow"])
+
+        summary = self.client.get("/api/portfolio?portfolio_id=default")
+        self.assertDecimalEqual(summary.json()["cash_flow"], "-43.00")
+
     def test_upload_transactions_skips_duplicates_and_lists_accounts(self):
         first_upload = self._upload_golden_csv()
         self.assertEqual(first_upload.status_code, 200)

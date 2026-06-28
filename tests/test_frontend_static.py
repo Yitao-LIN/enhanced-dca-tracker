@@ -60,6 +60,42 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("Demo mode calculates locally and does not show saved backend plans.", source)
         self.assertNotIn("apiAvailable ? dcaPlans : [", source)
 
+    def test_manual_transaction_ui_uses_backend_create_endpoint(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("function renderManualTransactionForm()", source)
+        self.assertIn("async function saveManualTransaction(event)", source)
+        self.assertIn('apiRequest("/api/transactions"', source)
+        self.assertIn('transaction_type: type', source)
+        self.assertIn('type === "fee" || type === "cash" ? amount : parseNumber(manualDraft.fees)', source)
+
+    def test_manual_transaction_ui_searches_security_mapping(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+        manual_form_body = source[source.index("function renderManualTransactionForm()") : source.index("/** @brief Render current allocation bars")]
+
+        self.assertIn("async function searchManualTransactionMapping()", source)
+        self.assertIn("/api/securities/search?query=", source)
+        self.assertIn("Search mapping", manual_form_body)
+        self.assertIn("useManualSearchResult(result)", manual_form_body)
+        self.assertIn('updateManualDraft("ticker", result.symbol)', source)
+
+    def test_manual_transaction_entry_is_backend_only(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+        manual_form_body = source[source.index("function renderManualTransactionForm()") : source.index("/** @brief Render current allocation bars")]
+
+        self.assertIn('disabled={!apiAvailable || apiLoading}', manual_form_body)
+        self.assertIn("Connect API to add manual transactions.", source)
+        self.assertNotIn("setTransactions((current)", manual_form_body)
+
+    def test_manual_transaction_keeps_fortuneo_import_available(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("Fortuneo CSV/ZIP", source)
+        self.assertIn("/api/transactions/preview?portfolio_id=", source)
+        self.assertIn("/api/transactions/upload?portfolio_id=", source)
+        self.assertIn("function importFile(event)", source)
+        self.assertIn("function confirmImport()", source)
+
 
 if __name__ == "__main__":
     unittest.main()

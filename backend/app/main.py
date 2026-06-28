@@ -182,6 +182,7 @@ def add_account(payload: AccountIn, db: Session = Depends(get_db)) -> dict[str, 
 
 @app.post("/api/transactions", response_model=TransactionCreateOut)
 def add_transaction(payload: TransactionIn, db: Session = Depends(get_db)) -> dict[str, object]:
+    count_before = count_transactions(db, portfolio_id=payload.portfolio_id)
     transaction = Transaction(
         transaction_date=payload.transaction_date,
         ticker=payload.ticker.upper(),
@@ -194,7 +195,8 @@ def add_transaction(payload: TransactionIn, db: Session = Depends(get_db)) -> di
         description=payload.description,
     )
     save_transaction(db, transaction, portfolio_id=payload.portfolio_id)
-    return {"created": True, "count": count_transactions(db, portfolio_id=payload.portfolio_id)}
+    count_after = count_transactions(db, portfolio_id=payload.portfolio_id)
+    return {"created": count_after > count_before, "count": count_after}
 
 
 @app.post("/api/transactions/upload", response_model=ImportSummaryOut)

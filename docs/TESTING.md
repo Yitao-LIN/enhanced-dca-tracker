@@ -49,7 +49,7 @@ Purpose:
 - verify portfolio history and benchmark normalization.
 - verify yfinance historical response normalization.
 - verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
-- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, portfolio analytics, allocation targets, DCA plans, market history, intraday history, hidden securities, and validation errors.
+- verify FastAPI route contracts, response-model serialization, manual transaction behavior, preview/upload behavior, portfolio summaries, portfolio analytics, allocation targets, DCA plans, market history, intraday history, hidden securities, and validation errors.
 - verify the standalone frontend calls analytics endpoints and does not render demo analytics as backend data.
 
 Expected output:
@@ -69,6 +69,10 @@ test_intraday_history_rejects_invalid_interval ... ok
 test_intraday_history_uses_daily_fallback_when_intraday_rows_are_missing ... ok
 test_invalid_csv_preview_returns_row_errors_without_bad_request ... ok
 test_invalid_csv_upload_returns_bad_request ... ok
+test_manual_amount_style_transactions_are_accepted ... ok
+test_manual_buy_creates_account_summary_and_reports_duplicates ... ok
+test_manual_transaction_ui_searches_security_mapping ... ok
+test_manual_transaction_validation_rejects_invalid_payloads ... ok
 test_market_history_and_portfolio_history_match_golden_fixture ... ok
 test_market_history_backfill_rejects_reversed_date_range ... ok
 test_market_history_backfill_skips_failed_symbols ... ok
@@ -93,6 +97,9 @@ test_backend_empty_analytics_does_not_render_demo_activity ... ok
 test_backend_empty_dca_plans_do_not_render_demo_plans_as_backend_data ... ok
 test_backend_empty_history_does_not_render_demo_monthly_chart ... ok
 test_dca_strategy_ui_uses_plan_endpoints ... ok
+test_manual_transaction_entry_is_backend_only ... ok
+test_manual_transaction_keeps_fortuneo_import_available ... ok
+test_manual_transaction_ui_uses_backend_create_endpoint ... ok
 test_market_price_parser_keeps_dot_decimal_prices ... ok
 test_allocation_targets_replace_and_validate_per_portfolio ... ok
 test_dca_plans_are_persisted_per_portfolio_and_default_is_exclusive ... ok
@@ -132,7 +139,7 @@ test_portfolio_history_starts_at_first_transaction ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 76 tests
+Ran 83 tests
 
 OK
 ```
@@ -506,7 +513,20 @@ Purpose:
 Expected page behavior:
 
 - top-right status shows `Backend connected`;
-- import panel shows `Default Portfolio`;
+- transaction panel shows `Default Portfolio`;
+- entering `AMUNDI MSCI WORLD` in the manual transaction `Search mapping` field and clicking `Search` returns ticker suggestions; clicking `Use` fills the manual transaction ticker.
+- filling the manual transaction form with date `2026-01-15`, type `Buy`, ticker `CW8.PA`, quantity `1`, price `470.50`, fees `1.95`, currency `EUR`, and account `PEA`, then clicking `Add transaction`, shows a status like:
+
+```text
+Added buy transaction for CW8.PA.
+```
+
+- submitting the same manual row again shows a duplicate status like:
+
+```text
+Skipped duplicate transaction for CW8.PA.
+```
+
 - choosing the sample CSV shows a preview status like:
 
 ```text
@@ -597,6 +617,14 @@ Run frontend backend connection smoke tests after changing:
 - backend CORS config;
 - API route payloads used by the frontend.
 
+Run manual transaction smoke checks after changing:
+
+- `POST /api/transactions`;
+- `/api/securities/search`;
+- `TransactionIn` or `TransactionCreateOut`;
+- transaction fingerprint behavior;
+- manual entry rendering or payload conversion in `frontend/index.html`.
+
 ## Synthetic Fixture Dataset
 
 The repository includes a small synthetic golden dataset under:
@@ -657,7 +685,7 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 76 tests, OK
+Automated tests: 83 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works

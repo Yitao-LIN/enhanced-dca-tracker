@@ -8,7 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ApiModel(BaseModel):
@@ -41,13 +41,21 @@ class TransactionIn(BaseModel):
     portfolio_id: str = "default"
     transaction_date: date
     ticker: str
-    transaction_type: str
-    quantity: Decimal
-    price: Decimal
-    fees: Decimal = Decimal("0")
+    transaction_type: Literal["buy", "sell", "dividend", "fee", "cash"]
+    quantity: Decimal = Field(ge=0)
+    price: Decimal = Field(ge=0)
+    fees: Decimal = Field(default=Decimal("0"), ge=0)
     currency: str = "EUR"
     account: str | None = None
     description: str | None = None
+
+    @field_validator("ticker")
+    @classmethod
+    def ticker_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("ticker must not be blank")
+        return normalized
 
 
 class PriceMap(BaseModel):
