@@ -7,7 +7,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -203,19 +203,22 @@ class IntradayMarketPriceRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-class DcaSettingsRecord(Base):
-    """@brief Portfolio-specific Enhanced DCA preferences and multiplier bounds."""
+class DcaPlanRecord(Base):
+    """@brief Named DCA strategy plan scoped to one portfolio."""
 
-    __tablename__ = "dca_settings"
-    __table_args__ = (UniqueConstraint("portfolio_record_id", name="uq_dca_settings_portfolio"),)
+    __tablename__ = "dca_plans"
+    __table_args__ = (UniqueConstraint("portfolio_record_id", "name", name="uq_dca_plans_portfolio_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     portfolio_record_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    model_type: Mapped[str] = mapped_column(String(32), default="enhanced", index=True)
     base_amount: Mapped[Decimal] = mapped_column(Numeric(20, 8), default=Decimal("1000"))
     preferred_benchmark: Mapped[str] = mapped_column(String(32), default="^GSPC")
     min_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0.7000"))
     max_multiplier: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("1.5000"))
     contribution_frequency: Mapped[str] = mapped_column(String(32), default="monthly")
+    is_default: Mapped[bool] = mapped_column(Boolean(), default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

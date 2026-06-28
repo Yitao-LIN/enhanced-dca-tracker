@@ -9,6 +9,7 @@ import re
 import unicodedata
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,17 +21,18 @@ from app.domain import Transaction, TransactionType
 from app.repositories import (
     DEFAULT_PORTFOLIO_ID,
     AllocationTarget,
-    DcaSettings,
     add_transaction as save_transaction,
     bootstrap_reference_data,
     count_transactions,
     create_portfolio,
+    create_dca_plan,
+    delete_dca_plan,
     delete_hidden_security,
     delete_security_mapping,
     delete_transactions_for_ticker,
     ensure_account,
     existing_transaction_fingerprints,
-    get_dca_settings as load_dca_settings,
+    get_dca_plan as load_dca_plan,
     get_hidden_security_symbols,
     get_market_prices,
     get_security_mapping_symbols,
@@ -41,14 +43,17 @@ from app.repositories import (
     list_hidden_securities as load_hidden_securities,
     list_market_price_history,
     list_accounts as load_accounts,
+    list_dca_plans as load_dca_plans,
     list_portfolios as load_portfolios,
     list_security_mappings as load_security_mappings,
     list_transactions as load_transactions,
     MarketPriceHistoryPoint,
+    DcaPlan,
+    portfolio_id_for_record_id,
     SecurityMapping,
     transaction_fingerprint,
     replace_allocation_targets,
-    upsert_dca_settings,
+    update_dca_plan,
     upsert_hidden_security,
     upsert_intraday_market_prices_many,
     upsert_market_price,
@@ -61,10 +66,11 @@ from app.schemas import (
     AllocationTargetIn,
     AllocationTargetOut,
     DeletedCountOut,
-    DcaRequest,
+    DcaPlanIn,
+    DcaPlanOut,
+    DcaPlanUpdateIn,
+    DcaRecommendationRequest,
     DcaRecommendationOut,
-    DcaSettingsIn,
-    DcaSettingsOut,
     HealthOut,
     HiddenSecurityIn,
     HiddenSecurityOut,
@@ -93,7 +99,7 @@ from app.schemas import (
     UpdatedCountOut,
 )
 from app.services.csv_import import preview_transactions_csv, parse_transactions_csv
-from app.services.dca import calculate_enhanced_dca
+from app.services.dca import build_dca_allocation_suggestions, calculate_enhanced_dca, calculate_normal_dca
 from app.services.market_data import DEFAULT_BENCHMARKS, YFinanceMarketDataProvider
 from app.services.portfolio import summarize_portfolio
 from app.services.portfolio_analytics import AllocationTargetInput, build_portfolio_analytics
@@ -781,54 +787,112 @@ def get_portfolio_intraday_history(
     ]
 
 
-@app.get("/api/dca/settings", response_model=DcaSettingsOut)
-def get_dca_settings(
+@app.get("/api/dca/plans", response_model=list[DcaPlanOut])
+def list_dca_strategy_plans(
     portfolio_id: str = DEFAULT_PORTFOLIO_ID,
     db: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    """@brief Return saved DCA strategy plans for one portfolio."""
+    return [
+        _dca_plan_payload(record, portfolio_id)
+        for record in load_dca_plans(db, portfolio_id=portfolio_id)
+    ]
+
+
+@app.post("/api/dca/plans", response_model=DcaPlanOut)
+def create_dca_strategy_plan(payload: DcaPlanIn, db: Session = Depends(get_db)) -> dict[str, object]:
+    """@brief Create one saved DCA strategy plan."""
+    try:
+        record = create_dca_plan(db, _dca_plan_value(payload, portfolio_id=payload.portfolio_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _dca_plan_payload(record, payload.portfolio_id)
+
+
+@app.get("/api/dca/plans/{plan_id}", response_model=DcaPlanOut)
+def get_dca_strategy_plan(plan_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
+    """@brief Return one saved DCA strategy plan."""
+    record = load_dca_plan(db, plan_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="DCA plan not found.")
+    return _dca_plan_payload(record, portfolio_id_for_record_id(db, record.portfolio_record_id))
+
+
+@app.put("/api/dca/plans/{plan_id}", response_model=DcaPlanOut)
+def update_dca_strategy_plan(
+    plan_id: int,
+    payload: DcaPlanUpdateIn,
+    db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    return _dca_settings_payload(load_dca_settings(db, portfolio_id=portfolio_id), portfolio_id)
+    """@brief Update one saved DCA strategy plan."""
+    current = load_dca_plan(db, plan_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="DCA plan not found.")
+    portfolio_id = portfolio_id_for_record_id(db, current.portfolio_record_id)
+    try:
+        record = update_dca_plan(db, plan_id, _dca_plan_value(payload, portfolio_id=portfolio_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="DCA plan not found.")
+    return _dca_plan_payload(record, portfolio_id)
 
 
-@app.put("/api/dca/settings", response_model=DcaSettingsOut)
-def set_dca_settings(payload: DcaSettingsIn, db: Session = Depends(get_db)) -> dict[str, object]:
-    if payload.min_multiplier > payload.max_multiplier:
-        raise HTTPException(status_code=400, detail="min_multiplier must be less than or equal to max_multiplier.")
-    record = upsert_dca_settings(
-        db,
-        DcaSettings(
-            portfolio_id=payload.portfolio_id,
-            base_amount=payload.base_amount,
-            preferred_benchmark=payload.preferred_benchmark,
-            min_multiplier=payload.min_multiplier,
-            max_multiplier=payload.max_multiplier,
-            contribution_frequency=payload.contribution_frequency,
-        ),
-    )
-    return _dca_settings_payload(record, payload.portfolio_id)
+@app.delete("/api/dca/plans/{plan_id}", response_model=DeletedCountOut)
+def delete_dca_strategy_plan(plan_id: int, db: Session = Depends(get_db)) -> dict[str, int]:
+    """@brief Delete one saved DCA strategy plan."""
+    return {"deleted": int(delete_dca_plan(db, plan_id))}
 
 
-@app.post("/api/dca/recommendation", response_model=DcaRecommendationOut)
-def get_dca_recommendation(payload: DcaRequest, db: Session = Depends(get_db)) -> object:
-    """@brief Return an Enhanced DCA recommendation using payload or saved settings."""
-    settings = load_dca_settings(db, portfolio_id=payload.portfolio_id)
-    benchmark_symbol = (payload.benchmark_symbol or settings.preferred_benchmark).upper()
-    market_change_percent = payload.market_change_percent
-    if market_change_percent is None:
-        history = list_market_price_history(
-            db,
-            symbol=benchmark_symbol,
-            start_date=payload.start_date,
-            end_date=payload.end_date,
+@app.post("/api/dca/plans/{plan_id}/recommendation", response_model=DcaRecommendationOut)
+def get_dca_plan_recommendation(
+    plan_id: int,
+    payload: DcaRecommendationRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """@brief Return a total and optional ticker split from one saved DCA plan."""
+    plan = load_dca_plan(db, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="DCA plan not found.")
+    portfolio_id = portfolio_id_for_record_id(db, plan.portfolio_record_id)
+    if plan.model_type == "normal":
+        recommendation = calculate_normal_dca(base_amount=plan.base_amount)
+    elif plan.model_type == "enhanced":
+        market_change_percent = payload.market_change_percent
+        if market_change_percent is None:
+            history = list_market_price_history(
+                db,
+                symbol=plan.preferred_benchmark,
+                start_date=payload.start_date,
+                end_date=payload.end_date,
+            )
+            market_change_percent = _market_change_percent(history)
+        recommendation = calculate_enhanced_dca(
+            base_amount=plan.base_amount,
+            market_change_percent=market_change_percent,
+            volatility_index=payload.volatility_index,
+            min_multiplier=plan.min_multiplier,
+            max_multiplier=plan.max_multiplier,
         )
-        market_change_percent = _market_change_percent(history)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported DCA model type.")
 
-    return calculate_enhanced_dca(
-        base_amount=payload.base_amount or settings.base_amount,
-        market_change_percent=market_change_percent,
-        volatility_index=payload.volatility_index,
-        min_multiplier=settings.min_multiplier,
-        max_multiplier=settings.max_multiplier,
-    )
+    allocation_suggestions = _dca_allocation_suggestions(db, portfolio_id, recommendation.adjusted_amount)
+    if plan.model_type == "normal":
+        recommendation = calculate_normal_dca(
+            base_amount=plan.base_amount,
+            allocation_suggestions=allocation_suggestions,
+        )
+    else:
+        recommendation = calculate_enhanced_dca(
+            base_amount=plan.base_amount,
+            market_change_percent=recommendation.market_change_percent,
+            volatility_index=payload.volatility_index,
+            min_multiplier=plan.min_multiplier,
+            max_multiplier=plan.max_multiplier,
+            allocation_suggestions=allocation_suggestions,
+        )
+    return _dca_recommendation_payload(plan, portfolio_id, recommendation)
 
 
 def _portfolio_payload(record: object) -> dict[str, object]:
@@ -1026,16 +1090,62 @@ def _market_price_history_payload(record: object) -> dict[str, object]:
     }
 
 
-def _dca_settings_payload(record: object, portfolio_id: str) -> dict[str, object]:
+def _dca_plan_value(payload: object, portfolio_id: str) -> DcaPlan:
+    """@brief Convert a DCA plan request schema into a repository value object."""
+    return DcaPlan(
+        portfolio_id=portfolio_id,
+        name=payload.name,
+        model_type=payload.model_type,
+        base_amount=payload.base_amount,
+        preferred_benchmark=payload.preferred_benchmark,
+        min_multiplier=payload.min_multiplier,
+        max_multiplier=payload.max_multiplier,
+        contribution_frequency=payload.contribution_frequency,
+        is_default=payload.is_default,
+    )
+
+
+def _dca_plan_payload(record: object, portfolio_id: str) -> dict[str, object]:
+    """@brief Serialize a DCA strategy plan with its public portfolio id."""
     return {
+        "id": record.id,
         "portfolio_id": portfolio_id,
+        "name": record.name,
+        "model_type": record.model_type,
         "base_amount": record.base_amount,
         "preferred_benchmark": record.preferred_benchmark,
         "min_multiplier": record.min_multiplier,
         "max_multiplier": record.max_multiplier,
         "contribution_frequency": record.contribution_frequency,
+        "is_default": record.is_default,
         "created_at": record.created_at,
         "updated_at": record.updated_at,
+    }
+
+
+def _dca_recommendation_payload(plan: object, portfolio_id: str, recommendation: object) -> dict[str, object]:
+    """@brief Serialize a DCA recommendation with plan metadata and ticker splits."""
+    return {
+        "plan_id": plan.id,
+        "plan_name": plan.name,
+        "model_type": recommendation.model_type,
+        "portfolio_id": portfolio_id,
+        "base_amount": recommendation.base_amount,
+        "adjusted_amount": recommendation.adjusted_amount,
+        "multiplier": recommendation.multiplier,
+        "market_change_percent": recommendation.market_change_percent,
+        "volatility_index": recommendation.volatility_index,
+        "reason": recommendation.reason,
+        "allocation_suggestions": [
+            {
+                "ticker": suggestion.ticker,
+                "suggested_amount": suggestion.suggested_amount,
+                "target_percent": suggestion.target_percent,
+                "current_percent": suggestion.current_percent,
+                "reason": suggestion.reason,
+            }
+            for suggestion in recommendation.allocation_suggestions
+        ],
     }
 
 
@@ -1110,6 +1220,44 @@ def _portfolio_analytics_payload(analytics: object) -> dict[str, object]:
             for row in analytics.benchmark_comparison
         ],
     }
+
+
+def _dca_allocation_suggestions(db: Session, portfolio_id: str, total_amount: Decimal) -> list[object]:
+    """@brief Build DCA per-ticker suggestions from visible allocation targets."""
+    hidden_symbols = get_hidden_security_symbols(db, portfolio_id=portfolio_id)
+    target_records = [
+        record
+        for record in load_allocation_targets(db, portfolio_id=portfolio_id)
+        if record.ticker.upper() not in hidden_symbols
+    ]
+    if not target_records:
+        return []
+
+    transactions = _visible_transactions(db, portfolio_id)
+    if not transactions:
+        target_rows = [
+            SimpleNamespace(
+                ticker=record.ticker,
+                target_percent=record.target_percent,
+                current_percent=Decimal("0.00"),
+                buy_value=Decimal("0.00"),
+            )
+            for record in target_records
+        ]
+        return build_dca_allocation_suggestions(total_amount, target_rows)
+
+    summary = summarize_portfolio(transactions, get_market_prices(db))
+    analytics = build_portfolio_analytics(
+        transactions,
+        summary=summary,
+        allocation_targets=[
+            AllocationTargetInput(ticker=record.ticker, target_percent=record.target_percent)
+            for record in target_records
+        ],
+        history_points=[],
+        benchmark_names={},
+    )
+    return build_dca_allocation_suggestions(total_amount, analytics.allocation_drift)
 
 
 def _visible_transactions(db: Session, portfolio_id: str) -> list[Transaction]:

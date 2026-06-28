@@ -10,14 +10,14 @@ from decimal import Decimal
 import hashlib
 import re
 
-from sqlalchemy import distinct, select
+from sqlalchemy import distinct, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.domain import MarketSnapshot, Transaction, TransactionType
 from app.models import (
     AccountRecord,
     AllocationTargetRecord,
-    DcaSettingsRecord,
+    DcaPlanRecord,
     HiddenSecurityRecord,
     ImportSessionRecord,
     IntradayMarketPriceRecord,
@@ -36,6 +36,8 @@ DEFAULT_PORTFOLIO_NAME = "Default Portfolio"
 DECIMAL_FINGERPRINT_PRECISION = Decimal("0.00000001")
 DEFAULT_DCA_BASE_AMOUNT = Decimal("1000")
 DEFAULT_DCA_BENCHMARK = "^GSPC"
+DEFAULT_DCA_PLAN_NAME = "Default Enhanced DCA"
+DCA_MODEL_TYPES = {"normal", "enhanced"}
 
 
 @dataclass(frozen=True)
@@ -86,15 +88,18 @@ class IntradayMarketPricePoint:
 
 
 @dataclass(frozen=True)
-class DcaSettings:
-    """@brief Domain-like value object for persisted DCA settings."""
+class DcaPlan:
+    """@brief Value object for a saved DCA strategy plan."""
 
     portfolio_id: str = DEFAULT_PORTFOLIO_ID
+    name: str = DEFAULT_DCA_PLAN_NAME
+    model_type: str = "enhanced"
     base_amount: Decimal = DEFAULT_DCA_BASE_AMOUNT
     preferred_benchmark: str = DEFAULT_DCA_BENCHMARK
     min_multiplier: Decimal = Decimal("0.7")
     max_multiplier: Decimal = Decimal("1.5")
     contribution_frequency: str = "monthly"
+    is_default: bool = False
 
 
 @dataclass(frozen=True)
@@ -432,6 +437,7 @@ def replace_allocation_targets(
 def bootstrap_reference_data(db: Session) -> None:
     """@brief Ensure default rows and fingerprints exist for older local databases."""
     ensure_portfolio(db)
+    _bootstrap_legacy_dca_settings(db)
     statement = select(
         distinct(TransactionRecord.portfolio_id),
         TransactionRecord.account,
@@ -461,41 +467,107 @@ def bootstrap_reference_data(db: Session) -> None:
     db.commit()
 
 
-def get_dca_settings(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> DcaSettingsRecord:
-    """@brief Load DCA settings or create defaults for the selected portfolio."""
-    portfolio = ensure_portfolio(db, portfolio_id)
-    record = db.scalar(select(DcaSettingsRecord).where(DcaSettingsRecord.portfolio_record_id == portfolio.id))
-    if record is None:
-        record = DcaSettingsRecord(
-            portfolio_record_id=portfolio.id,
-            base_amount=DEFAULT_DCA_BASE_AMOUNT,
-            preferred_benchmark=DEFAULT_DCA_BENCHMARK,
-            min_multiplier=Decimal("0.7"),
-            max_multiplier=Decimal("1.5"),
-            contribution_frequency="monthly",
-        )
-        db.add(record)
-        db.commit()
-        db.refresh(record)
-    return record
+def list_dca_plans(db: Session, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> list[DcaPlanRecord]:
+    """@brief List saved DCA plans for one portfolio."""
+    slug = _normalize_slug(portfolio_id)
+    portfolio = db.scalar(select(PortfolioRecord).where(PortfolioRecord.slug == slug))
+    if portfolio is None:
+        return []
+    statement = (
+        select(DcaPlanRecord)
+        .where(DcaPlanRecord.portfolio_record_id == portfolio.id)
+        .order_by(DcaPlanRecord.is_default.desc(), DcaPlanRecord.name)
+    )
+    return list(db.scalars(statement))
 
 
-def upsert_dca_settings(db: Session, settings: DcaSettings) -> DcaSettingsRecord:
-    """@brief Save portfolio-specific DCA settings."""
-    portfolio = ensure_portfolio(db, settings.portfolio_id)
-    record = db.scalar(select(DcaSettingsRecord).where(DcaSettingsRecord.portfolio_record_id == portfolio.id))
-    if record is None:
-        record = DcaSettingsRecord(portfolio_record_id=portfolio.id)
-        db.add(record)
+def get_dca_plan(db: Session, plan_id: int) -> DcaPlanRecord | None:
+    """@brief Load one saved DCA plan by primary key."""
+    return db.get(DcaPlanRecord, plan_id)
 
-    record.base_amount = settings.base_amount
-    record.preferred_benchmark = settings.preferred_benchmark.upper()
-    record.min_multiplier = settings.min_multiplier
-    record.max_multiplier = settings.max_multiplier
-    record.contribution_frequency = settings.contribution_frequency.lower()
+
+def create_dca_plan(db: Session, plan: DcaPlan) -> DcaPlanRecord:
+    """@brief Create a validated DCA plan and maintain one default plan per portfolio."""
+    normalized = _normalize_dca_plan(plan)
+    portfolio = ensure_portfolio(db, normalized.portfolio_id)
+    _assert_dca_plan_name_available(db, portfolio.id, normalized.name)
+    existing_plan = db.scalar(select(DcaPlanRecord.id).where(DcaPlanRecord.portfolio_record_id == portfolio.id))
+    is_default = normalized.is_default or existing_plan is None
+    if is_default:
+        _unset_default_dca_plans(db, portfolio.id)
+    record = DcaPlanRecord(
+        portfolio_record_id=portfolio.id,
+        name=normalized.name,
+        model_type=normalized.model_type,
+        base_amount=normalized.base_amount,
+        preferred_benchmark=normalized.preferred_benchmark,
+        min_multiplier=normalized.min_multiplier,
+        max_multiplier=normalized.max_multiplier,
+        contribution_frequency=normalized.contribution_frequency,
+        is_default=is_default,
+    )
+    db.add(record)
     db.commit()
     db.refresh(record)
     return record
+
+
+def update_dca_plan(db: Session, plan_id: int, plan: DcaPlan) -> DcaPlanRecord | None:
+    """@brief Update a saved DCA plan without moving it between portfolios."""
+    record = get_dca_plan(db, plan_id)
+    if record is None:
+        return None
+    portfolio_slug = portfolio_id_for_record_id(db, record.portfolio_record_id)
+    normalized = _normalize_dca_plan(DcaPlan(**{**plan.__dict__, "portfolio_id": portfolio_slug}))
+    _assert_dca_plan_name_available(db, record.portfolio_record_id, normalized.name, exclude_plan_id=record.id)
+    existing_other_plan = db.scalar(
+        select(DcaPlanRecord.id).where(
+            DcaPlanRecord.portfolio_record_id == record.portfolio_record_id,
+            DcaPlanRecord.id != record.id,
+        )
+    )
+    is_default = normalized.is_default or existing_other_plan is None
+    if is_default:
+        _unset_default_dca_plans(db, record.portfolio_record_id, exclude_plan_id=record.id)
+
+    record.name = normalized.name
+    record.model_type = normalized.model_type
+    record.base_amount = normalized.base_amount
+    record.preferred_benchmark = normalized.preferred_benchmark
+    record.min_multiplier = normalized.min_multiplier
+    record.max_multiplier = normalized.max_multiplier
+    record.contribution_frequency = normalized.contribution_frequency
+    record.is_default = is_default
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def delete_dca_plan(db: Session, plan_id: int) -> bool:
+    """@brief Delete a DCA plan and promote another plan if the default was removed."""
+    record = get_dca_plan(db, plan_id)
+    if record is None:
+        return False
+    portfolio_record_id = record.portfolio_record_id
+    was_default = record.is_default
+    db.delete(record)
+    db.commit()
+    if was_default:
+        replacement = db.scalar(
+            select(DcaPlanRecord)
+            .where(DcaPlanRecord.portfolio_record_id == portfolio_record_id)
+            .order_by(DcaPlanRecord.name)
+        )
+        if replacement is not None:
+            replacement.is_default = True
+            db.commit()
+    return True
+
+
+def portfolio_id_for_record_id(db: Session, portfolio_record_id: int) -> str:
+    """@brief Resolve a portfolio record id back to its public slug."""
+    portfolio = db.get(PortfolioRecord, portfolio_record_id)
+    return portfolio.slug if portfolio is not None else DEFAULT_PORTFOLIO_ID
 
 
 def add_transaction(db: Session, transaction: Transaction, portfolio_id: str = DEFAULT_PORTFOLIO_ID) -> TransactionRecord:
@@ -902,6 +974,123 @@ def _normalize_optional_text(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+def _normalize_dca_plan(plan: DcaPlan) -> DcaPlan:
+    """@brief Normalize and validate a saved DCA strategy plan."""
+    name = re.sub(r"\s+", " ", plan.name).strip()
+    if not name:
+        raise ValueError("DCA plan name is required.")
+    model_type = plan.model_type.strip().lower()
+    if model_type not in DCA_MODEL_TYPES:
+        raise ValueError("model_type must be one of: enhanced, normal.")
+    if plan.base_amount < 0:
+        raise ValueError("base_amount must be greater than or equal to 0.")
+    if plan.min_multiplier <= 0 or plan.max_multiplier <= 0:
+        raise ValueError("DCA multipliers must be greater than 0.")
+    if plan.min_multiplier > plan.max_multiplier:
+        raise ValueError("min_multiplier must be less than or equal to max_multiplier.")
+    preferred_benchmark = plan.preferred_benchmark.strip().upper() or DEFAULT_DCA_BENCHMARK
+    contribution_frequency = plan.contribution_frequency.strip().lower() or "monthly"
+    return DcaPlan(
+        portfolio_id=_normalize_slug(plan.portfolio_id),
+        name=name,
+        model_type=model_type,
+        base_amount=plan.base_amount,
+        preferred_benchmark=preferred_benchmark,
+        min_multiplier=plan.min_multiplier,
+        max_multiplier=plan.max_multiplier,
+        contribution_frequency=contribution_frequency,
+        is_default=bool(plan.is_default),
+    )
+
+
+def _assert_dca_plan_name_available(
+    db: Session,
+    portfolio_record_id: int,
+    name: str,
+    exclude_plan_id: int | None = None,
+) -> None:
+    """@brief Reject duplicate DCA plan names inside one portfolio."""
+    statement = select(DcaPlanRecord).where(
+        DcaPlanRecord.portfolio_record_id == portfolio_record_id,
+        DcaPlanRecord.name == name,
+    )
+    if exclude_plan_id is not None:
+        statement = statement.where(DcaPlanRecord.id != exclude_plan_id)
+    if db.scalar(statement) is not None:
+        raise ValueError("DCA plan name already exists for this portfolio.")
+
+
+def _unset_default_dca_plans(
+    db: Session,
+    portfolio_record_id: int,
+    exclude_plan_id: int | None = None,
+) -> None:
+    """@brief Clear the default flag from sibling plans before saving a new default."""
+    statement = select(DcaPlanRecord).where(DcaPlanRecord.portfolio_record_id == portfolio_record_id)
+    if exclude_plan_id is not None:
+        statement = statement.where(DcaPlanRecord.id != exclude_plan_id)
+    for record in db.scalars(statement):
+        record.is_default = False
+
+
+def _bootstrap_legacy_dca_settings(db: Session) -> None:
+    """@brief Seed DCA plans from legacy direct-created dca_settings tables when present."""
+    if db.bind is None:
+        return
+    table_names = set(inspect(db.bind).get_table_names())
+    if "dca_settings" not in table_names or "dca_plans" not in table_names:
+        return
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                portfolio_record_id,
+                base_amount,
+                preferred_benchmark,
+                min_multiplier,
+                max_multiplier,
+                contribution_frequency,
+                created_at,
+                updated_at
+            FROM dca_settings
+            """
+        )
+    ).mappings()
+    for row in rows:
+        existing_plan_id = db.scalar(
+            select(DcaPlanRecord.id).where(DcaPlanRecord.portfolio_record_id == row["portfolio_record_id"])
+        )
+        if existing_plan_id is not None:
+            continue
+        db.add(
+            DcaPlanRecord(
+                portfolio_record_id=row["portfolio_record_id"],
+                name=DEFAULT_DCA_PLAN_NAME,
+                model_type="enhanced",
+                base_amount=row["base_amount"],
+                preferred_benchmark=row["preferred_benchmark"],
+                min_multiplier=row["min_multiplier"],
+                max_multiplier=row["max_multiplier"],
+                contribution_frequency=row["contribution_frequency"],
+                is_default=True,
+                created_at=_coerce_datetime(row["created_at"]),
+                updated_at=_coerce_datetime(row["updated_at"]),
+            )
+        )
+
+
+def _coerce_datetime(value: object) -> datetime:
+    """@brief Convert raw SQLite legacy timestamp values into datetimes."""
+    if isinstance(value, datetime):
+        return value
+    if value:
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return datetime.now(timezone.utc)
 
 
 def _normalize_allocation_targets(targets: list[AllocationTarget]) -> list[AllocationTarget]:

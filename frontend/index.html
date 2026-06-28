@@ -1007,8 +1007,62 @@
         return `${value >= 0 ? "+" : ""}${money(value)}`;
       }
 
-      /** @brief Mirror the backend Enhanced DCA rule when running in demo mode. */
-      function calculateDca(baseAmount, marketChange, volatility) {
+      /** @brief Build the local draft for a new unsaved DCA plan. */
+      function defaultDcaDraft(portfolioId = "default") {
+        return {
+          portfolio_id: portfolioId,
+          name: "Monthly normal",
+          model_type: "normal",
+          base_amount: 1000,
+          preferred_benchmark: "^GSPC",
+          min_multiplier: 0.7,
+          max_multiplier: 1.5,
+          contribution_frequency: "monthly",
+          is_default: false,
+        };
+      }
+
+      /** @brief Convert a backend DCA plan response into editable component state. */
+      function dcaDraftFromPlan(plan, portfolioId = "default") {
+        if (!plan) return defaultDcaDraft(portfolioId);
+        return {
+          portfolio_id: plan.portfolio_id || portfolioId,
+          name: plan.name || "Monthly normal",
+          model_type: plan.model_type || "normal",
+          base_amount: toNumber(plan.base_amount) || 0,
+          preferred_benchmark: plan.preferred_benchmark || "^GSPC",
+          min_multiplier: toNumber(plan.min_multiplier) || 0.7,
+          max_multiplier: toNumber(plan.max_multiplier) || 1.5,
+          contribution_frequency: plan.contribution_frequency || "monthly",
+          is_default: Boolean(plan.is_default),
+        };
+      }
+
+      /** @brief Convert editable DCA state into the plan create/update payload. */
+      function dcaPlanPayload(draft, portfolioId) {
+        return {
+          portfolio_id: portfolioId,
+          name: String(draft.name || "").trim(),
+          model_type: draft.model_type,
+          base_amount: Number(draft.base_amount) || 0,
+          preferred_benchmark: String(draft.preferred_benchmark || "^GSPC").trim().toUpperCase(),
+          min_multiplier: Number(draft.min_multiplier) || 0.7,
+          max_multiplier: Number(draft.max_multiplier) || 1.5,
+          contribution_frequency: String(draft.contribution_frequency || "monthly").trim().toLowerCase(),
+          is_default: Boolean(draft.is_default),
+        };
+      }
+
+      /** @brief Mirror backend Normal and Enhanced DCA rules when running in demo mode. */
+      function calculateDca(modelType, baseAmount, marketChange, volatility) {
+        if (modelType === "normal") {
+          return {
+            adjusted: Math.round(baseAmount),
+            multiplier: 1,
+            reason: "Keep contribution because this Normal DCA plan uses a fixed amount.",
+            allocationSuggestions: [],
+          };
+        }
         let multiplier = 1;
         if (marketChange <= -5) multiplier = 1.5;
         else if (marketChange <= -3) multiplier = 1.3;
@@ -1023,7 +1077,7 @@
         const action = multiplier > 1 ? "Increase" : multiplier < 1 ? "Decrease" : "Keep";
         const move = marketChange < 0 ? `market is down ${Math.abs(marketChange).toFixed(1)}%` : `market is up ${marketChange.toFixed(1)}%`;
         const reason = `${action} the next contribution because the ${move}${volatility >= 30 ? " and volatility is elevated" : ""}.`;
-        return { adjusted, multiplier, reason };
+        return { adjusted, multiplier, reason, allocationSuggestions: [] };
       }
 
       function statusLabel(status) {
@@ -1267,9 +1321,10 @@
         const [chartRange, setChartRange] = useState("1y");
         const [visibleBenchmarks, setVisibleBenchmarks] = useState({ sp500: true, nasdaq100: true });
         const [hiddenSecurities, setHiddenSecurities] = useState([]);
-        const [selectedBenchmark, setSelectedBenchmark] = useState("^GSPC");
         const [apiDca, setApiDca] = useState(null);
-        const [baseAmount, setBaseAmount] = useState(1000);
+        const [dcaPlans, setDcaPlans] = useState([]);
+        const [selectedDcaPlanId, setSelectedDcaPlanId] = useState("");
+        const [dcaDraft, setDcaDraft] = useState(() => defaultDcaDraft("default"));
         const [marketChange, setMarketChange] = useState(-2.3);
         const [volatility, setVolatility] = useState(18.5);
         const [importPreview, setImportPreview] = useState(null);
@@ -1296,7 +1351,8 @@
         const benchmarkComparison = portfolioAnalytics.benchmark_comparison || [];
         const totalTargetPercent = apiAvailable ? toNumber(portfolioAnalytics.total_target_percent) : 0;
         const unassignedTargetPercent = apiAvailable ? toNumber(portfolioAnalytics.unassigned_target_percent) : 100;
-        const dca = apiDca || calculateDca(baseAmount, marketChange, volatility);
+        const dcaBaseAmount = toNumber(dcaDraft.base_amount);
+        const dca = apiDca || calculateDca(dcaDraft.model_type, dcaBaseAmount, marketChange, volatility);
         const previewRows = importPreview?.rows || [];
         const previewNewRows = previewRows.filter((row) => row.status === "new").length;
         const previewMappingRows = previewRows.filter((row) => row.status === "needs_mapping");
@@ -1742,6 +1798,9 @@
             setPortfolioAnalytics(emptyPortfolioAnalytics);
             setAllocationTargets([]);
             setTargetDrafts({});
+            setDcaPlans([]);
+            setSelectedDcaPlanId("");
+            setDcaDraft(defaultDcaDraft(selectedPortfolioId));
             setStatus("Backend unavailable. Demo mode is active.");
           } finally {
             setApiLoading(false);
@@ -1779,12 +1838,12 @@
           const { autoBackfill = false, quiet = false } = options;
           setApiLoading(true);
           try {
-            const [portfolioRows, accountRows, summary, historyRows, dcaSettings, mappingRows, hiddenRows, targetRows, analytics] = await Promise.all([
+            const [portfolioRows, accountRows, summary, historyRows, dcaPlanRows, mappingRows, hiddenRows, targetRows, analytics] = await Promise.all([
               apiRequest("/api/portfolios"),
               apiRequest(`/api/accounts?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/portfolio?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(historyPath(portfolioId)),
-              apiRequest(`/api/dca/settings?portfolio_id=${encodeURIComponent(portfolioId)}`),
+              apiRequest(`/api/dca/plans?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/security-mappings?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/hidden-securities?portfolio_id=${encodeURIComponent(portfolioId)}`),
               apiRequest(`/api/allocation-targets?portfolio_id=${encodeURIComponent(portfolioId)}`),
@@ -1800,8 +1859,11 @@
             setPortfolioAnalytics(analytics);
             setTargetDrafts(targetDraftsFromRows(targetRows, analytics.allocation_drift || []));
             setMappingDrafts(mappingDraftsFromRows(mappingRows));
-            setBaseAmount(toNumber(dcaSettings.base_amount) || 1000);
-            setSelectedBenchmark(dcaSettings.preferred_benchmark || "^GSPC");
+            setDcaPlans(dcaPlanRows);
+            const activePlan = dcaPlanRows.find((plan) => String(plan.id) === String(selectedDcaPlanId)) || dcaPlanRows.find((plan) => plan.is_default) || dcaPlanRows[0];
+            setSelectedDcaPlanId(activePlan ? String(activePlan.id) : "");
+            setDcaDraft(dcaDraftFromPlan(activePlan, portfolioId));
+            setApiDca(null);
             setPrices((current) => ({
               ...current,
               ...(summary.holdings || []).reduce((nextPrices, holding) => {
@@ -1841,6 +1903,9 @@
             setPortfolioAnalytics(emptyPortfolioAnalytics);
             setAllocationTargets([]);
             setTargetDrafts({});
+            setDcaPlans([]);
+            setSelectedDcaPlanId("");
+            setDcaDraft(defaultDcaDraft(portfolioId));
             setStatus(`Backend sync failed: ${error.message}`);
           } finally {
             setApiLoading(false);
@@ -2050,47 +2115,72 @@
           }
         }
 
-        async function saveDcaSettings() {
+        /** @brief Load a saved DCA plan into the editable strategy form. */
+        function selectDcaPlan(planId) {
+          const selected = dcaPlans.find((plan) => String(plan.id) === String(planId));
+          setSelectedDcaPlanId(selected ? String(selected.id) : "");
+          setDcaDraft(dcaDraftFromPlan(selected, selectedPortfolioId));
+          setApiDca(null);
+        }
+
+        /** @brief Start editing a new unsaved DCA plan. */
+        function startNewDcaPlan() {
+          setSelectedDcaPlanId("");
+          setDcaDraft(defaultDcaDraft(selectedPortfolioId));
+          setApiDca(null);
+        }
+
+        /** @brief Update one field in the editable DCA strategy draft. */
+        function updateDcaDraft(field, value) {
+          setDcaDraft((current) => ({ ...current, [field]: value }));
+          setApiDca(null);
+        }
+
+        /** @brief Create or update the active saved DCA strategy plan. */
+        async function saveDcaPlan() {
           if (!apiAvailable) return;
+          const payload = dcaPlanPayload(dcaDraft, selectedPortfolioId);
+          const updating = selectedDcaPlanId && dcaPlans.some((plan) => String(plan.id) === String(selectedDcaPlanId));
           try {
-            await apiRequest("/api/dca/settings", {
-              method: "PUT",
+            const saved = await apiRequest(updating ? `/api/dca/plans/${encodeURIComponent(selectedDcaPlanId)}` : "/api/dca/plans", {
+              method: updating ? "PUT" : "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                portfolio_id: selectedPortfolioId,
-                base_amount: baseAmount,
-                preferred_benchmark: selectedBenchmark,
-                min_multiplier: 0.7,
-                max_multiplier: 1.5,
-                contribution_frequency: "monthly",
-              }),
+              body: JSON.stringify(payload),
             });
-            setStatus("Saved DCA settings.");
+            const planRows = await apiRequest(`/api/dca/plans?portfolio_id=${encodeURIComponent(selectedPortfolioId)}`);
+            setDcaPlans(planRows);
+            setSelectedDcaPlanId(String(saved.id));
+            setDcaDraft(dcaDraftFromPlan(saved, selectedPortfolioId));
+            setStatus(`Saved DCA plan ${saved.name}.`);
           } catch (error) {
-            setStatus(`DCA settings save failed: ${error.message}`);
+            setStatus(`DCA plan save failed: ${error.message}`);
           }
         }
 
-        async function refreshBenchmarkDca() {
+        /** @brief Compute a recommendation from the selected saved DCA plan. */
+        async function refreshDcaRecommendation() {
           if (!apiAvailable) return;
+          if (!selectedDcaPlanId) {
+            setStatus("Select or save a DCA plan before computing a recommendation.");
+            return;
+          }
           try {
-            const recommendation = await apiRequest("/api/dca/recommendation", {
+            const recommendation = await apiRequest(`/api/dca/plans/${encodeURIComponent(selectedDcaPlanId)}/recommendation`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                portfolio_id: selectedPortfolioId,
-                base_amount: baseAmount,
-                benchmark_symbol: selectedBenchmark,
+              body: JSON.stringify(dcaDraft.model_type === "enhanced" ? {
+                market_change_percent: marketChange,
                 volatility_index: volatility,
-              }),
+              } : {}),
             });
             setApiDca({
               adjusted: toNumber(recommendation.adjusted_amount),
               multiplier: toNumber(recommendation.multiplier),
               reason: recommendation.reason,
+              allocationSuggestions: recommendation.allocation_suggestions || [],
             });
             setMarketChange(toNumber(recommendation.market_change_percent));
-            setStatus(`DCA recommendation refreshed from ${selectedBenchmark}.`);
+            setStatus(`DCA recommendation refreshed from ${recommendation.plan_name}.`);
           } catch (error) {
             setStatus(`DCA recommendation failed: ${error.message}`);
           }
@@ -2416,7 +2506,7 @@
               <div className="actions">
                 <span className="pill">{apiAvailable ? "Backend connected" : "Demo mode"}</span>
                 <button disabled={apiLoading} onClick={connectBackend}>{apiAvailable ? "Sync API" : "Connect API"}</button>
-                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setHiddenSecurities([]); setAllocationTargets([]); setPortfolioAnalytics(emptyPortfolioAnalytics); setTargetDrafts({}); setNewTarget({ ticker: "", target_percent: "" }); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
+                <button onClick={() => { clearImportPreview(); setApiAvailable(false); setTransactions(parseCsv(sampleCsv)); setSecurityMappings([]); setHiddenSecurities([]); setAllocationTargets([]); setPortfolioAnalytics(emptyPortfolioAnalytics); setTargetDrafts({}); setNewTarget({ ticker: "", target_percent: "" }); setDcaPlans([]); setSelectedDcaPlanId(""); setDcaDraft(defaultDcaDraft(selectedPortfolioId)); setApiDca(null); setMappingDrafts({}); setMappingEditorOpen(false); setStatus("Demo data restored."); }}>Demo data</button>
                 <button className="primary" onClick={simulateMarket}>Refresh market simulation</button>
               </div>
             </header>
@@ -2660,38 +2750,104 @@
                 </div>
 
                 <div className="panel">
-                  <h2>Enhanced DCA</h2>
+                  <div className="toolbar">
+                    <h2>DCA Strategy</h2>
+                    {apiAvailable && <button onClick={startNewDcaPlan}>New plan</button>}
+                  </div>
+                  {apiAvailable && (
+                    <div style={{ marginBottom: 12 }}>
+                      <label>Saved plan</label>
+                      <select value={selectedDcaPlanId} onChange={(event) => selectDcaPlan(event.target.value)}>
+                        <option value="">New unsaved plan</option>
+                        {dcaPlans.map((plan) => (
+                          <option key={plan.id} value={plan.id}>{plan.name}{plan.is_default ? " (default)" : ""}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="controls" style={{ marginTop: 12 }}>
                     <div>
+                      <label>Plan name</label>
+                      <input type="text" value={dcaDraft.name} onChange={(event) => updateDcaDraft("name", event.target.value)} />
+                    </div>
+                    <div>
+                      <label>Model</label>
+                      <select value={dcaDraft.model_type} onChange={(event) => updateDcaDraft("model_type", event.target.value)}>
+                        <option value="normal">Normal DCA</option>
+                        <option value="enhanced">Enhanced DCA</option>
+                      </select>
+                    </div>
+                    <div>
                       <label>Base amount</label>
-                      <input type="number" value={baseAmount} min="0" step="50" onChange={(event) => { setApiDca(null); setBaseAmount(Number(event.target.value)); }} />
+                      <input type="number" value={dcaDraft.base_amount} min="0" step="50" onChange={(event) => updateDcaDraft("base_amount", Number(event.target.value))} />
+                    </div>
+                    <div>
+                      <label>Frequency</label>
+                      <select value={dcaDraft.contribution_frequency} onChange={(event) => updateDcaDraft("contribution_frequency", event.target.value)}>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                      </select>
                     </div>
                     <div>
                       <label>Benchmark</label>
-                      <select value={selectedBenchmark} onChange={(event) => { setApiDca(null); setSelectedBenchmark(event.target.value); }}>
+                      <select value={dcaDraft.preferred_benchmark} disabled={dcaDraft.model_type !== "enhanced"} onChange={(event) => updateDcaDraft("preferred_benchmark", event.target.value)}>
                         <option value="^GSPC">S&P 500</option>
                         <option value="^NDX">Nasdaq 100</option>
                       </select>
                     </div>
                     <div>
                       <label>Market change %</label>
-                      <input type="number" value={marketChange} step="0.1" onChange={(event) => { setApiDca(null); setMarketChange(Number(event.target.value)); }} />
+                      <input type="number" value={marketChange} step="0.1" disabled={dcaDraft.model_type !== "enhanced"} onChange={(event) => { setApiDca(null); setMarketChange(Number(event.target.value)); }} />
+                    </div>
+                    <div>
+                      <label>Min multiplier</label>
+                      <input type="number" value={dcaDraft.min_multiplier} min="0" step="0.1" disabled={dcaDraft.model_type !== "enhanced"} onChange={(event) => updateDcaDraft("min_multiplier", Number(event.target.value))} />
+                    </div>
+                    <div>
+                      <label>Max multiplier</label>
+                      <input type="number" value={dcaDraft.max_multiplier} min="0" step="0.1" disabled={dcaDraft.model_type !== "enhanced"} onChange={(event) => updateDcaDraft("max_multiplier", Number(event.target.value))} />
                     </div>
                     <div>
                       <label>VIX</label>
-                      <input type="number" value={volatility} step="0.1" onChange={(event) => { setApiDca(null); setVolatility(Number(event.target.value)); }} />
+                      <input type="number" value={volatility} step="0.1" disabled={dcaDraft.model_type !== "enhanced"} onChange={(event) => { setApiDca(null); setVolatility(Number(event.target.value)); }} />
                     </div>
                   </div>
                   {apiAvailable && (
                     <div className="actions" style={{ marginTop: 12 }}>
-                      <button onClick={saveDcaSettings}>Save settings</button>
-                      <button className="primary" onClick={refreshBenchmarkDca}>Use benchmark</button>
+                      <button onClick={saveDcaPlan}>Save plan</button>
+                      <button className="primary" onClick={refreshDcaRecommendation}>Compute recommendation</button>
                     </div>
                   )}
+                  {!apiAvailable && <p className="mapping-note" style={{ marginTop: 10 }}>Demo mode calculates locally and does not show saved backend plans.</p>}
                   <div className="recommendation">
                     <span className="label">Next investment amount</span>
-                    <div className={`amount ${dca.adjusted > baseAmount ? "positive" : dca.adjusted < baseAmount ? "warning" : ""}`}>{money(dca.adjusted)}</div>
+                    <div className={`amount ${dca.adjusted > dcaBaseAmount ? "positive" : dca.adjusted < dcaBaseAmount ? "warning" : ""}`}>{money(dca.adjusted)}</div>
                     <div className="note">{dca.reason} Multiplier: {dca.multiplier.toFixed(2)}x.</div>
+                    {dca.allocationSuggestions?.length > 0 && (
+                      <div style={{ overflowX: "auto" }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Ticker</th>
+                              <th className="num">Suggested</th>
+                              <th className="num">Target</th>
+                              <th className="num">Current</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dca.allocationSuggestions.map((suggestion) => (
+                              <tr key={suggestion.ticker}>
+                                <td><strong>{suggestion.ticker}</strong></td>
+                                <td className="num">{money(toNumber(suggestion.suggested_amount))}</td>
+                                <td className="num">{toNumber(suggestion.target_percent).toFixed(1)}%</td>
+                                <td className="num">{toNumber(suggestion.current_percent).toFixed(1)}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </div>
 

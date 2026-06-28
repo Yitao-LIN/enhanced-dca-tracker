@@ -50,7 +50,7 @@ docs/TESTING.md
 |           |-- portfolio.py           # holdings and performance calculations
 |           |-- portfolio_history.py   # historical portfolio and benchmark series
 |           |-- portfolio_analytics.py # target allocation, activity, and benchmark analytics
-|           |-- dca.py                 # Enhanced DCA recommendation engine
+|           |-- dca.py                 # DCA strategy recommendation engine
 |           `-- market_data.py         # static and yfinance market providers
 |-- samples/
 |   `-- fortuneo_transactions_sample.csv
@@ -78,7 +78,7 @@ The frontend currently runs without a build step. It uses React from a CDN and i
 - intraday portfolio ranges with daily-history fallback when intraday rows are unavailable;
 - hidden/security tracking controls and ticker-level transaction deletion for clean re-imports;
 - S&P 500 and Nasdaq 100 benchmark backfill controls;
-- Enhanced DCA recommendation controls.
+- saved Normal and Enhanced DCA strategy plan controls.
 
 If the FastAPI backend is not available at `http://127.0.0.1:8000`, the frontend stays in demo mode and computes locally.
 
@@ -172,12 +172,15 @@ GET    /api/portfolio
 GET    /api/portfolio/analytics
 GET    /api/portfolio/history
 GET    /api/portfolio/history/intraday
-GET    /api/dca/settings
-PUT    /api/dca/settings
-POST   /api/dca/recommendation
+GET    /api/dca/plans
+POST   /api/dca/plans
+GET    /api/dca/plans/{plan_id}
+PUT    /api/dca/plans/{plan_id}
+DELETE /api/dca/plans/{plan_id}
+POST   /api/dca/plans/{plan_id}/recommendation
 ```
 
-Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, hidden securities, allocation targets, latest market prices, daily market price history, intraday market price history, and DCA settings. CSV imports skip duplicate transactions and return an import summary.
+Current storage is persistent SQLite for portfolios, accounts, transactions, import sessions, transaction fingerprints, security label mappings, hidden securities, allocation targets, DCA plans, latest market prices, daily market price history, and intraday market price history. CSV imports skip duplicate transactions and return an import summary.
 
 ## Run Automated Tests
 
@@ -194,18 +197,18 @@ Covered behavior:
 - buy/sell cost-basis handling;
 - portfolio value and return calculations;
 - target allocation drift, monthly activity, and benchmark comparison analytics.
-- Enhanced DCA amount adjustment.
+- Normal and Enhanced DCA plan recommendations.
 - SQLite repository persistence when SQLAlchemy is installed.
 - duplicate-safe CSV import sessions.
 - S&P 500/Nasdaq 100 historical market price storage and range reads.
 - intraday market price storage and fallback portfolio history reads.
 - portfolio history and benchmark normalization.
-- persisted DCA settings.
+- persisted named DCA strategy plans.
 - persisted and editable per-portfolio Fortuneo security label mappings.
 - hidden security tracking and ticker-level transaction deletion/re-import.
 - persisted per-portfolio allocation targets.
 - synthetic golden fixtures for parser, summary, history, and duplicate-preview behavior.
-- FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, portfolio analytics, allocation targets, market history, intraday history, DCA settings, hidden securities, deletion, and validation errors.
+- FastAPI route contracts for previews, mapping-assisted uploads, portfolio summaries, portfolio analytics, allocation targets, DCA plans, market history, intraday history, hidden securities, deletion, and validation errors.
 
 ## CSV Import Format
 
@@ -237,7 +240,11 @@ CSV uploads return an import summary:
 
 Duplicate detection is based on a transaction fingerprint: date, ticker, transaction type, quantity, price, fees, currency, and account.
 
-## Enhanced DCA Logic
+## DCA Strategy Logic
+
+Normal DCA keeps the next contribution at the saved base amount.
+
+Enhanced DCA adjusts that base amount from benchmark movement and optional volatility:
 
 ```text
 Market condition        Adjustment
@@ -250,6 +257,8 @@ Market condition        Adjustment
 ```
 
 If volatility is high and the recommendation is already increasing contributions, the engine adds another 10%. If volatility is low, it trims the increase by 10%.
+
+Saved DCA plans are named per portfolio. A plan recommendation returns a headline next investment amount and, when allocation targets exist, suggested per-ticker contribution amounts.
 
 ## Next Build Steps
 

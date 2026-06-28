@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
@@ -119,8 +119,19 @@ class MarketSnapshot:
 
 
 @dataclass(frozen=True)
+class DcaAllocationSuggestion:
+    """@brief Suggested contribution amount for one target allocation ticker."""
+
+    ticker: str
+    suggested_amount: Decimal
+    target_percent: Decimal
+    current_percent: Decimal
+    reason: str
+
+
+@dataclass(frozen=True)
 class DcaRecommendation:
-    """@brief Enhanced DCA output consumed by the API and frontend."""
+    """@brief DCA output consumed by the API and frontend."""
 
     base_amount: Decimal
     adjusted_amount: Decimal
@@ -128,3 +139,5 @@ class DcaRecommendation:
     market_change_percent: Decimal
     volatility_index: Decimal | None
     reason: str
+    model_type: str = "enhanced"
+    allocation_suggestions: list[DcaAllocationSuggestion] = field(default_factory=list)

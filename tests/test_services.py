@@ -8,12 +8,13 @@ import zipfile
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
 from app.domain import Transaction, TransactionType
 from app.services.csv_import import parse_transactions_csv, preview_transactions_csv
-from app.services.dca import calculate_enhanced_dca
+from app.services.dca import build_dca_allocation_suggestions, calculate_enhanced_dca, calculate_normal_dca
 from app.services.market_data import normalize_yfinance_history, normalize_yfinance_search_quotes
 from app.services.portfolio import build_holdings, summarize_portfolio
 from app.services.portfolio_analytics import AllocationTargetInput, build_portfolio_analytics
@@ -368,6 +369,13 @@ class PortfolioAnalyticsTests(unittest.TestCase):
 
 
 class DcaTests(unittest.TestCase):
+    def test_normal_dca_keeps_base_amount(self):
+        recommendation = calculate_normal_dca(base_amount=Decimal("850"))
+
+        self.assertEqual(recommendation.model_type, "normal")
+        self.assertEqual(recommendation.adjusted_amount, Decimal("850.00"))
+        self.assertEqual(recommendation.multiplier, Decimal("1.0"))
+
     def test_enhanced_dca_increases_on_market_drawdown(self):
         recommendation = calculate_enhanced_dca(
             base_amount=Decimal("1000"),
@@ -388,6 +396,36 @@ class DcaTests(unittest.TestCase):
 
         self.assertEqual(recommendation.adjusted_amount, Decimal("1500.00"))
         self.assertEqual(recommendation.multiplier, Decimal("1.5"))
+
+    def test_dca_allocation_split_uses_underweight_buy_values(self):
+        rows = [
+            SimpleNamespace(ticker="CW8.PA", target_percent=Decimal("70"), current_percent=Decimal("60"), buy_value=Decimal("300")),
+            SimpleNamespace(ticker="EWLD.PA", target_percent=Decimal("20"), current_percent=Decimal("15"), buy_value=Decimal("100")),
+            SimpleNamespace(ticker="VEUR.AS", target_percent=Decimal("10"), current_percent=Decimal("25"), buy_value=Decimal("0")),
+        ]
+
+        suggestions = build_dca_allocation_suggestions(Decimal("800"), rows)
+
+        self.assertEqual([(row.ticker, row.suggested_amount) for row in suggestions], [("CW8.PA", Decimal("600.00")), ("EWLD.PA", Decimal("200.00"))])
+        self.assertEqual({row.reason for row in suggestions}, {"underweight target allocation"})
+
+    def test_dca_allocation_split_falls_back_to_target_percent(self):
+        rows = [
+            SimpleNamespace(ticker="CW8.PA", target_percent=Decimal("70"), current_percent=Decimal("75"), buy_value=Decimal("0")),
+            SimpleNamespace(ticker="EWLD.PA", target_percent=Decimal("30"), current_percent=Decimal("25"), buy_value=Decimal("0")),
+        ]
+
+        suggestions = build_dca_allocation_suggestions(Decimal("1000"), rows)
+
+        self.assertEqual([(row.ticker, row.suggested_amount) for row in suggestions], [("CW8.PA", Decimal("700.00")), ("EWLD.PA", Decimal("300.00"))])
+        self.assertEqual({row.reason for row in suggestions}, {"target allocation percent"})
+
+    def test_dca_allocation_split_returns_empty_without_targets(self):
+        rows = [
+            SimpleNamespace(ticker="CW8.PA", target_percent=None, current_percent=Decimal("100"), buy_value=Decimal("0")),
+        ]
+
+        self.assertEqual(build_dca_allocation_suggestions(Decimal("1000"), rows), [])
 
 
 class MarketDataTests(unittest.TestCase):

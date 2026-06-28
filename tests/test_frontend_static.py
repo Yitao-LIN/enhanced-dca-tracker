@@ -43,6 +43,23 @@ class FrontendStaticTests(unittest.TestCase):
         self.assertIn("const benchmarkComparison = portfolioAnalytics.benchmark_comparison || [];", source)
         self.assertNotIn("apiAvailable ? monthlyActivity : demo", source)
 
+    def test_dca_strategy_ui_uses_plan_endpoints(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("/api/dca/plans?portfolio_id=", source)
+        self.assertIn("/api/dca/plans/${encodeURIComponent(selectedDcaPlanId)}/recommendation", source)
+        self.assertIn("DCA Strategy", source)
+        self.assertIn("function saveDcaPlan()", source)
+        self.assertNotIn("/api/dca/settings", source)
+        self.assertNotIn("/api/dca/recommendation", source)
+
+    def test_backend_empty_dca_plans_do_not_render_demo_plans_as_backend_data(self):
+        source = FRONTEND_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("const [dcaPlans, setDcaPlans] = useState([]);", source)
+        self.assertIn("Demo mode calculates locally and does not show saved backend plans.", source)
+        self.assertNotIn("apiAvailable ? dcaPlans : [", source)
+
 
 if __name__ == "__main__":
     unittest.main()

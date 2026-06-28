@@ -103,9 +103,12 @@ GET    /api/portfolio
 GET    /api/portfolio/analytics
 GET    /api/portfolio/history
 GET    /api/portfolio/history/intraday
-GET    /api/dca/settings
-PUT    /api/dca/settings
-POST   /api/dca/recommendation
+GET    /api/dca/plans
+POST   /api/dca/plans
+GET    /api/dca/plans/{plan_id}
+PUT    /api/dca/plans/{plan_id}
+DELETE /api/dca/plans/{plan_id}
+POST   /api/dca/plans/{plan_id}/recommendation
 ```
 
 Each route that needs persistence receives a SQLAlchemy database session:
@@ -177,8 +180,9 @@ IntradayMarketBackfillRequest
 SecurityMappingIn
 HiddenSecurityIn
 AllocationTargetIn
-DcaSettingsIn
-DcaRequest
+DcaPlanIn
+DcaPlanUpdateIn
+DcaRecommendationRequest
 ```
 
 Current response schemas include:
@@ -200,19 +204,25 @@ PortfolioSummaryOut
 PortfolioAnalyticsOut
 PortfolioHistoryPointOut
 PortfolioIntradayHistoryPointOut
-DcaSettingsOut
+DcaPlanOut
 DcaRecommendationOut
 ```
 
 When the frontend sends JSON to FastAPI, FastAPI validates it with request schemas before the data reaches repositories or services. When routes return data, FastAPI validates and serializes it with response schemas.
 
-Example request body for `DcaRequest`:
+Example request body for `DcaPlanIn`:
 
 ```json
 {
+  "portfolio_id": "default",
+  "name": "Drawdown boost",
+  "model_type": "enhanced",
   "base_amount": 1000,
-  "market_change_percent": -2.3,
-  "volatility_index": 18.5
+  "preferred_benchmark": "^GSPC",
+  "min_multiplier": 0.7,
+  "max_multiplier": 1.5,
+  "contribution_frequency": "monthly",
+  "is_default": true
 }
 ```
 
@@ -269,10 +279,10 @@ Alembic owns schema changes. The current migration chain creates:
 - security label mappings;
 - hidden securities;
 - allocation targets;
+- DCA plans;
 - latest market prices;
 - daily historical market prices;
 - intraday historical market prices;
-- DCA settings.
 
 Run migrations manually from `backend/`:
 
@@ -308,7 +318,7 @@ AllocationTargetRecord
 MarketPriceRecord
 MarketPriceHistoryRecord
 IntradayMarketPriceRecord
-DcaSettingsRecord
+DcaPlanRecord
 ```
 
 `PortfolioRecord` stores a named portfolio, such as the default personal portfolio or a future strategy-specific portfolio.
@@ -439,7 +449,19 @@ Important fields:
 
 The latest-price table is useful for current portfolio valuation. The daily and intraday history tables back real performance charts, S&P 500/Nasdaq 100 benchmark comparisons, and backfills from providers such as Yahoo Finance.
 
-`DcaSettingsRecord` stores portfolio-specific DCA preferences, including base amount, preferred benchmark, multiplier bounds, and contribution frequency.
+`DcaPlanRecord` stores named DCA strategy plans scoped to one portfolio.
+
+Important fields:
+
+- `portfolio_record_id`
+- `name`
+- `model_type`
+- `base_amount`
+- `preferred_benchmark`
+- `min_multiplier`
+- `max_multiplier`
+- `contribution_frequency`
+- `is_default`
 
 ## Repositories
 
@@ -466,7 +488,7 @@ They know how to:
 - save or update historical market prices;
 - read historical market prices by symbol, date range, and source;
 - save and read intraday market prices by symbol, timestamp range, interval, and source;
-- save and load DCA settings;
+- create, update, delete, and list DCA strategy plans;
 - return current prices as a `{ticker: price}` dictionary.
 
 Current repository functions:
@@ -489,8 +511,11 @@ upsert_market_price_history_many()
 list_market_price_history()
 upsert_intraday_market_prices_many()
 list_intraday_market_prices()
-get_dca_settings()
-upsert_dca_settings()
+list_dca_plans()
+get_dca_plan()
+create_dca_plan()
+update_dca_plan()
+delete_dca_plan()
 get_security_mapping_symbols()
 upsert_security_mappings()
 list_hidden_securities()
@@ -606,12 +631,14 @@ Empty states are explicit:
 backend/app/services/dca.py
 ```
 
-This computes the Enhanced DCA recommendation.
+This computes Normal and Enhanced DCA recommendations plus optional per-ticker contribution splits.
 
-Main function:
+Main functions:
 
 ```python
+calculate_normal_dca(base_amount)
 calculate_enhanced_dca(base_amount, market_change_percent, volatility_index)
+build_dca_allocation_suggestions(total_amount, allocation_drift)
 ```
 
 Current rule:
@@ -671,7 +698,7 @@ Tests the pure business logic:
 - holdings after buy/sell;
 - portfolio summary;
 - portfolio analytics for allocation drift, monthly activity, and benchmark comparison;
-- DCA recommendation.
+- DCA strategy plans and recommendations.
 
 ```text
 tests/test_repositories.py
@@ -691,7 +718,7 @@ Keeps the synthetic golden fixture dataset aligned with parser, portfolio summar
 tests/test_api_routes.py
 ```
 
-Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, market history, intraday market history, DCA settings, DCA recommendation, and validation errors.
+Tests the FastAPI route layer through `TestClient` with an isolated in-memory SQLite database. These tests cover preview, mapping-assisted upload, saved mapping management, duplicate-safe re-upload, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, market history, intraday market history, DCA plans, DCA recommendations, and validation errors.
 
 ## Current Data Flows
 
@@ -912,13 +939,20 @@ GET /api/portfolio/history/intraday
     -> timestamped invested, value, gain, S&P 500, Nasdaq 100 series
 ```
 
-DCA recommendation:
+DCA plan recommendation:
 
 ```text
-POST /api/dca/recommendation
-  -> optional list_market_price_history() for preferred benchmark movement
-  -> calculate_enhanced_dca()
-    -> DcaRecommendation
+POST /api/dca/plans/{plan_id}/recommendation
+  -> get_dca_plan()
+  -> for normal plans: calculate_normal_dca()
+  -> for enhanced plans:
+    -> optional list_market_price_history() for preferred benchmark movement
+    -> calculate_enhanced_dca()
+  -> list_allocation_targets()
+  -> _visible_transactions()
+  -> build_portfolio_analytics()
+  -> build_dca_allocation_suggestions()
+    -> total amount plus optional per-ticker contribution suggestions
 ```
 
 ## Why This Architecture Works

@@ -37,7 +37,7 @@ Purpose:
 
 - verify Fortuneo-style CSV parsing;
 - verify portfolio math and cost-basis behavior;
-- verify Enhanced DCA recommendation logic;
+- verify Normal and Enhanced DCA recommendation logic;
 - verify SQLAlchemy repository persistence;
 - verify portfolio/account isolation;
 - verify duplicate-safe CSV imports.
@@ -45,19 +45,19 @@ Purpose:
 - verify intraday market price upsert, backfill, and fallback history behavior.
 - verify hidden security filtering and ticker-level transaction deletion/re-import.
 - verify allocation target persistence and portfolio analytics.
-- verify DCA settings persistence.
+- verify DCA plan persistence.
 - verify portfolio history and benchmark normalization.
 - verify yfinance historical response normalization.
 - verify synthetic golden fixtures stay aligned with parser, portfolio summary, portfolio history, and duplicate-preview expectations.
-- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, portfolio analytics, allocation targets, market history, intraday history, DCA settings, hidden securities, and validation errors.
+- verify FastAPI route contracts, response-model serialization, preview/upload behavior, portfolio summaries, portfolio analytics, allocation targets, DCA plans, market history, intraday history, hidden securities, and validation errors.
 - verify the standalone frontend calls analytics endpoints and does not render demo analytics as backend data.
 
 Expected output:
 
 ```text
 test_allocation_target_routes_replace_and_validate_payloads ... ok
-test_dca_settings_and_recommendation_routes ... ok
-test_dca_settings_rejects_inverted_multiplier_bounds ... ok
+test_dca_plan_crud_and_recommendation_routes ... ok
+test_dca_plan_routes_validate_errors ... ok
 test_delete_ticker_transactions_allows_reimport ... ok
 test_empty_portfolio_summary_returns_zeroes ... ok
 test_fortuneo_account_export_preview_and_upload_report_wrong_export_type ... ok
@@ -90,15 +90,18 @@ test_golden_fixture_matches_expected_portfolio_history ... ok
 test_golden_fixture_matches_expected_summary ... ok
 test_analytics_ui_calls_backend_endpoints ... ok
 test_backend_empty_analytics_does_not_render_demo_activity ... ok
+test_backend_empty_dca_plans_do_not_render_demo_plans_as_backend_data ... ok
 test_backend_empty_history_does_not_render_demo_monthly_chart ... ok
+test_dca_strategy_ui_uses_plan_endpoints ... ok
 test_market_price_parser_keeps_dot_decimal_prices ... ok
 test_allocation_targets_replace_and_validate_per_portfolio ... ok
-test_dca_settings_are_persisted_per_portfolio ... ok
+test_dca_plans_are_persisted_per_portfolio_and_default_is_exclusive ... ok
 test_hidden_securities_are_persisted_per_portfolio ... ok
 test_import_allows_same_security_with_different_quantity ... ok
 test_import_skips_duplicate_transactions ... ok
 test_intraday_market_prices_upsert_and_filter_ranges ... ok
 test_keeps_portfolios_isolated ... ok
+test_legacy_dca_settings_bootstrap_into_default_plan ... ok
 test_market_price_history_upserts_and_filters_ranges ... ok
 test_persists_transactions_and_prices ... ok
 test_security_mappings_are_persisted_per_portfolio ... ok
@@ -112,6 +115,10 @@ test_preview_fortuneo_bourse_without_security_code_reports_mapping_error ... ok
 test_preview_fortuneo_bourse_zip_reports_mapping_row ... ok
 test_enhanced_dca_applies_settings_multiplier_bounds ... ok
 test_enhanced_dca_increases_on_market_drawdown ... ok
+test_dca_allocation_split_falls_back_to_target_percent ... ok
+test_dca_allocation_split_returns_empty_without_targets ... ok
+test_dca_allocation_split_uses_underweight_buy_values ... ok
+test_normal_dca_keeps_base_amount ... ok
 test_allocation_drift_with_partial_and_target_only_allocations ... ok
 test_allocation_drift_without_targets_keeps_current_allocation_read_only ... ok
 test_benchmark_comparison_handles_complete_missing_and_zero_start_history ... ok
@@ -125,7 +132,7 @@ test_portfolio_history_starts_at_first_transaction ... ok
 test_summarize_empty_portfolio_returns_zeroes ... ok
 test_summarize_portfolio_prices_holdings ... ok
 
-Ran 69 tests
+Ran 76 tests
 
 OK
 ```
@@ -217,6 +224,7 @@ INFO  [alembic.runtime.migration] Running upgrade 20260524_0003 -> 20260530_0004
 INFO  [alembic.runtime.migration] Running upgrade 20260530_0004 -> 20260607_0005, Add hidden securities.
 INFO  [alembic.runtime.migration] Running upgrade 20260607_0005 -> 20260609_0006, Add intraday market price history.
 INFO  [alembic.runtime.migration] Running upgrade 20260609_0006 -> 20260614_0007, Add allocation targets.
+INFO  [alembic.runtime.migration] Running upgrade 20260614_0007 -> 20260614_0008, Add DCA strategy plans.
 ```
 
 Then inspect the tables:
@@ -237,7 +245,7 @@ Expected output includes:
 accounts
 alembic_version
 allocation_targets
-dca_settings
+dca_plans
 hidden_securities
 import_sessions
 market_price_history
@@ -635,7 +643,7 @@ Purpose:
 - call FastAPI endpoints through `TestClient` instead of calling services directly;
 - use an isolated in-memory SQLite database by overriding the `get_db` dependency;
 - verify response-model serialization for `Decimal`, `date`, and `datetime` fields;
-- exercise the golden CSV preview/upload, mapping-assisted Fortuneo upload, duplicate-safe re-upload, account listing, price updates, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, daily and intraday market history, portfolio history, DCA settings, DCA recommendation, and validation error paths.
+- exercise the golden CSV preview/upload, mapping-assisted Fortuneo upload, duplicate-safe re-upload, account listing, price updates, hidden securities, allocation targets, ticker deletion/re-import, portfolio summary, portfolio analytics, daily and intraday market history, portfolio history, DCA plans, DCA recommendations, and validation error paths.
 
 Run these after changing:
 
@@ -649,12 +657,13 @@ Run these after changing:
 As of this guide, the healthy baseline is:
 
 ```text
-Automated tests: 69 tests, OK
+Automated tests: 76 tests, OK
 Alembic fresh SQLite migration: OK
 Duplicate CSV upload: first import saves rows, second import skips duplicates
 Historical market prices: range write/read works
 Intraday market prices: backfill, range filtering, and daily fallback work
 Hidden securities: filter summaries/history without deleting transactions
 Allocation analytics: targets persist per portfolio, hidden securities stay excluded, missing benchmark history is an empty comparison
+DCA plans: named Normal/Enhanced plans persist per portfolio and produce total plus per-ticker suggestions
 Frontend: demo fallback works, backend-connected mode works when FastAPI is running
 ```

@@ -170,25 +170,42 @@ class PortfolioHistoryRequest(BaseModel):
     end_date: date | None = None
 
 
-class DcaSettingsIn(BaseModel):
-    """@brief Request payload for portfolio-specific DCA settings."""
+class DcaPlanIn(BaseModel):
+    """@brief Request payload for creating a saved DCA strategy plan."""
+
+    model_config = ConfigDict(protected_namespaces=())
 
     portfolio_id: str = "default"
+    name: str = "Default Enhanced DCA"
+    model_type: Literal["normal", "enhanced"] = "enhanced"
     base_amount: Decimal = Decimal("1000")
     preferred_benchmark: str = "^GSPC"
     min_multiplier: Decimal = Decimal("0.7")
     max_multiplier: Decimal = Decimal("1.5")
     contribution_frequency: str = "monthly"
+    is_default: bool = False
 
 
-class DcaRequest(BaseModel):
-    """@brief Request payload for computing a DCA recommendation."""
+class DcaPlanUpdateIn(BaseModel):
+    """@brief Request payload for updating an existing DCA strategy plan."""
 
-    base_amount: Decimal | None = None
+    model_config = ConfigDict(protected_namespaces=())
+
+    name: str = "Default Enhanced DCA"
+    model_type: Literal["normal", "enhanced"] = "enhanced"
+    base_amount: Decimal = Decimal("1000")
+    preferred_benchmark: str = "^GSPC"
+    min_multiplier: Decimal = Decimal("0.7")
+    max_multiplier: Decimal = Decimal("1.5")
+    contribution_frequency: str = "monthly"
+    is_default: bool = False
+
+
+class DcaRecommendationRequest(BaseModel):
+    """@brief Request payload for computing a recommendation from a saved plan."""
+
     market_change_percent: Decimal | None = None
     volatility_index: Decimal | None = None
-    portfolio_id: str = "default"
-    benchmark_symbol: str | None = None
     start_date: date | None = None
     end_date: date | None = None
 
@@ -457,25 +474,48 @@ class PortfolioAnalyticsOut(ApiModel):
     benchmark_comparison: list[BenchmarkComparisonOut]
 
 
-class DcaSettingsOut(ApiModel):
-    """@brief Persisted DCA settings response."""
+class DcaPlanOut(ApiModel):
+    """@brief Persisted DCA strategy plan response."""
 
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: int
     portfolio_id: str
+    name: str
+    model_type: Literal["normal", "enhanced"]
     base_amount: Decimal
     preferred_benchmark: str
     min_multiplier: Decimal
     max_multiplier: Decimal
     contribution_frequency: str
+    is_default: bool
     created_at: datetime
     updated_at: datetime
+
+
+class DcaAllocationSuggestionOut(ApiModel):
+    """@brief Suggested contribution split for one ticker."""
+
+    ticker: str
+    suggested_amount: Decimal
+    target_percent: Decimal
+    current_percent: Decimal
+    reason: str
 
 
 class DcaRecommendationOut(ApiModel):
     """@brief DCA recommendation response."""
 
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    plan_id: int
+    plan_name: str
+    model_type: Literal["normal", "enhanced"]
+    portfolio_id: str
     base_amount: Decimal
     adjusted_amount: Decimal
     multiplier: Decimal
     market_change_percent: Decimal
     volatility_index: Decimal | None = None
     reason: str
+    allocation_suggestions: list[DcaAllocationSuggestionOut]

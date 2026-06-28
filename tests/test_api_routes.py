@@ -619,53 +619,139 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(history.status_code, 400)
         self.assertIn("interval must use minutes or hours", history.json()["detail"])
 
-    def test_dca_settings_and_recommendation_routes(self):
-        settings_payload = {
+    def test_dca_plan_crud_and_recommendation_routes(self):
+        normal_payload = {
             "portfolio_id": "default",
+            "name": "Monthly normal",
+            "model_type": "normal",
+            "base_amount": "500",
+            "preferred_benchmark": "^GSPC",
+            "min_multiplier": "0.7",
+            "max_multiplier": "1.5",
+            "contribution_frequency": "monthly",
+            "is_default": False,
+        }
+        normal = self.client.post("/api/dca/plans", json=normal_payload)
+        self.assertEqual(normal.status_code, 200)
+        self.assertEqual(normal.json()["model_type"], "normal")
+        self.assertTrue(normal.json()["is_default"])
+
+        enhanced_payload = {
+            "portfolio_id": "default",
+            "name": "Drawdown boost",
+            "model_type": "enhanced",
             "base_amount": "750",
             "preferred_benchmark": "^ndx",
             "min_multiplier": "0.8",
             "max_multiplier": "1.4",
             "contribution_frequency": "weekly",
+            "is_default": True,
         }
-        saved_settings = self.client.put("/api/dca/settings", json=settings_payload)
-        self.assertEqual(saved_settings.status_code, 200)
-        self.assertEqual(saved_settings.json()["base_amount"], "750.00000000")
-        self.assertEqual(saved_settings.json()["preferred_benchmark"], "^NDX")
-        self.assertEqual(saved_settings.json()["contribution_frequency"], "weekly")
+        enhanced = self.client.post("/api/dca/plans", json=enhanced_payload)
+        self.assertEqual(enhanced.status_code, 200)
+        self.assertEqual(enhanced.json()["preferred_benchmark"], "^NDX")
+        self.assertTrue(enhanced.json()["is_default"])
 
-        loaded_settings = self.client.get("/api/dca/settings?portfolio_id=default")
-        self.assertEqual(loaded_settings.status_code, 200)
-        self.assertEqual(loaded_settings.json()["preferred_benchmark"], "^NDX")
+        listed = self.client.get("/api/dca/plans?portfolio_id=default")
+        self.assertEqual([row["name"] for row in listed.json()], ["Drawdown boost", "Monthly normal"])
+        self.assertEqual([row["is_default"] for row in listed.json()], [True, False])
 
-        recommendation = self.client.post(
-            "/api/dca/recommendation",
+        loaded = self.client.get(f"/api/dca/plans/{normal.json()['id']}")
+        self.assertEqual(loaded.status_code, 200)
+        self.assertEqual(loaded.json()["name"], "Monthly normal")
+
+        updated = self.client.put(
+            f"/api/dca/plans/{normal.json()['id']}",
             json={
-                "portfolio_id": "default",
+                **normal_payload,
+                "name": "Monthly fixed",
+                "base_amount": "600",
+                "is_default": True,
+            },
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["base_amount"], "600.00000000")
+        self.assertTrue(updated.json()["is_default"])
+
+        self.client.put(
+            "/api/allocation-targets?portfolio_id=default",
+            json=[
+                {"ticker": "CW8.PA", "target_percent": "70"},
+                {"ticker": "EWLD.PA", "target_percent": "30"},
+            ],
+        )
+        self.client.put("/api/hidden-securities?portfolio_id=default", json={"ticker": "CW8.PA"})
+        normal_recommendation = self.client.post(f"/api/dca/plans/{normal.json()['id']}/recommendation", json={})
+        self.assertEqual(normal_recommendation.status_code, 200)
+        self.assertEqual(normal_recommendation.json()["model_type"], "normal")
+        self.assertEqual(normal_recommendation.json()["adjusted_amount"], "600.00")
+        self.assertEqual(
+            normal_recommendation.json()["allocation_suggestions"],
+            [
+                {
+                    "ticker": "EWLD.PA",
+                    "suggested_amount": "600.00",
+                    "target_percent": "30.0000",
+                    "current_percent": "0.00",
+                    "reason": "target allocation percent",
+                }
+            ],
+        )
+
+        enhanced_recommendation = self.client.post(
+            f"/api/dca/plans/{enhanced.json()['id']}/recommendation",
+            json={
                 "market_change_percent": "-4",
                 "volatility_index": "18",
             },
         )
-        self.assertEqual(recommendation.status_code, 200)
-        self.assertEqual(recommendation.json()["base_amount"], "750.00")
-        self.assertEqual(recommendation.json()["adjusted_amount"], "975.00")
-        self.assertEqual(recommendation.json()["multiplier"], "1.3")
+        self.assertEqual(enhanced_recommendation.status_code, 200)
+        self.assertEqual(enhanced_recommendation.json()["base_amount"], "750.00")
+        self.assertEqual(enhanced_recommendation.json()["adjusted_amount"], "975.00")
+        self.assertEqual(enhanced_recommendation.json()["multiplier"], "1.3")
 
-    def test_dca_settings_rejects_inverted_multiplier_bounds(self):
-        response = self.client.put(
-            "/api/dca/settings",
+        deleted = self.client.delete(f"/api/dca/plans/{enhanced.json()['id']}")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json(), {"deleted": 1})
+
+    def test_dca_plan_routes_validate_errors(self):
+        valid_payload = {
+            "portfolio_id": "default",
+            "name": "Drawdown boost",
+            "model_type": "enhanced",
+            "base_amount": "750",
+            "preferred_benchmark": "^GSPC",
+            "min_multiplier": "0.7",
+            "max_multiplier": "1.5",
+            "contribution_frequency": "monthly",
+            "is_default": True,
+        }
+        self.assertEqual(self.client.post("/api/dca/plans", json=valid_payload).status_code, 200)
+
+        duplicate = self.client.post("/api/dca/plans", json=valid_payload)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn("already exists", duplicate.json()["detail"])
+
+        invalid_model = self.client.post("/api/dca/plans", json={**valid_payload, "name": "Bad model", "model_type": "custom"})
+        self.assertEqual(invalid_model.status_code, 422)
+
+        invalid_bounds = self.client.post(
+            "/api/dca/plans",
             json={
+                **valid_payload,
+                "name": "Bad bounds",
                 "portfolio_id": "default",
-                "base_amount": "750",
-                "preferred_benchmark": "^GSPC",
                 "min_multiplier": "1.5",
                 "max_multiplier": "0.7",
-                "contribution_frequency": "monthly",
             },
         )
+        self.assertEqual(invalid_bounds.status_code, 400)
+        self.assertIn("min_multiplier must be less than or equal to max_multiplier", invalid_bounds.json()["detail"])
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("min_multiplier must be less than or equal to max_multiplier", response.json()["detail"])
+        missing = self.client.get("/api/dca/plans/999")
+        self.assertEqual(missing.status_code, 404)
+        missing_recommendation = self.client.post("/api/dca/plans/999/recommendation", json={})
+        self.assertEqual(missing_recommendation.status_code, 404)
 
     def test_invalid_csv_upload_returns_bad_request(self):
         response = self.client.post(

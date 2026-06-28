@@ -387,29 +387,101 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(ranged[0].close, Decimal("57.00000000"))
         self.assertEqual([record.price_at for record in full_history], [first_tick, second_tick])
 
-    def test_dca_settings_are_persisted_per_portfolio(self):
-        from app.repositories import DcaSettings, get_dca_settings, upsert_dca_settings
+    def test_dca_plans_are_persisted_per_portfolio_and_default_is_exclusive(self):
+        from app.repositories import DcaPlan, create_dca_plan, delete_dca_plan, list_dca_plans, update_dca_plan
 
         with self.Session() as db:
-            default_settings = get_dca_settings(db)
-            default_benchmark = default_settings.preferred_benchmark
-            saved = upsert_dca_settings(
+            first = create_dca_plan(
                 db,
-                DcaSettings(
+                DcaPlan(
                     portfolio_id="default",
+                    name="Monthly normal",
+                    model_type="normal",
                     base_amount=Decimal("750"),
-                    preferred_benchmark="^ndx",
-                    min_multiplier=Decimal("0.8"),
-                    max_multiplier=Decimal("1.4"),
-                    contribution_frequency="weekly",
                 ),
             )
-            loaded = get_dca_settings(db)
+            first_was_initial_default = first.is_default
+            second = create_dca_plan(
+                db,
+                DcaPlan(
+                    portfolio_id="default",
+                    name="Drawdown boost",
+                    model_type="enhanced",
+                    base_amount=Decimal("1000"),
+                    preferred_benchmark="^ndx",
+                    is_default=True,
+                ),
+            )
+            long_term = create_dca_plan(db, DcaPlan(portfolio_id="long-term", name="Monthly normal", model_type="normal"))
+            with self.assertRaises(ValueError):
+                create_dca_plan(db, DcaPlan(portfolio_id="default", name="Monthly normal", model_type="normal"))
 
-        self.assertEqual(default_benchmark, "^GSPC")
-        self.assertEqual(saved.preferred_benchmark, "^NDX")
-        self.assertEqual(loaded.base_amount, Decimal("750.00000000"))
-        self.assertEqual(loaded.contribution_frequency, "weekly")
+            promoted = update_dca_plan(
+                db,
+                first.id,
+                DcaPlan(name="Monthly normal", model_type="normal", base_amount=Decimal("900"), is_default=True),
+            )
+            deleted = delete_dca_plan(db, promoted.id)
+            default_plans = list_dca_plans(db)
+            long_term_plans = list_dca_plans(db, portfolio_id="long-term")
+
+        self.assertTrue(first_was_initial_default)
+        self.assertTrue(second.is_default)
+        self.assertEqual(long_term.name, "Monthly normal")
+        self.assertEqual(promoted.base_amount, Decimal("900.00000000"))
+        self.assertTrue(deleted)
+        self.assertEqual([(plan.name, plan.is_default) for plan in default_plans], [("Drawdown boost", True)])
+        self.assertEqual([plan.name for plan in long_term_plans], ["Monthly normal"])
+
+    def test_legacy_dca_settings_bootstrap_into_default_plan(self):
+        from sqlalchemy import text
+
+        from app.repositories import bootstrap_reference_data, ensure_portfolio, list_dca_plans
+
+        with self.Session() as db:
+            portfolio = ensure_portfolio(db)
+            db.execute(
+                text(
+                    """
+                    CREATE TABLE dca_settings (
+                        id INTEGER PRIMARY KEY,
+                        portfolio_record_id INTEGER NOT NULL,
+                        base_amount NUMERIC(20, 8) NOT NULL,
+                        preferred_benchmark VARCHAR(32) NOT NULL,
+                        min_multiplier NUMERIC(10, 4) NOT NULL,
+                        max_multiplier NUMERIC(10, 4) NOT NULL,
+                        contribution_frequency VARCHAR(32) NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL
+                    )
+                    """
+                )
+            )
+            db.execute(
+                text(
+                    """
+                    INSERT INTO dca_settings (
+                        portfolio_record_id,
+                        base_amount,
+                        preferred_benchmark,
+                        min_multiplier,
+                        max_multiplier,
+                        contribution_frequency,
+                        created_at,
+                        updated_at
+                    ) VALUES (:portfolio_record_id, '850', '^NDX', '0.8', '1.4', 'weekly', '2026-06-14T00:00:00', '2026-06-14T00:00:00')
+                    """
+                ),
+                {"portfolio_record_id": portfolio.id},
+            )
+            db.commit()
+            bootstrap_reference_data(db)
+            plans = list_dca_plans(db)
+
+        self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0].name, "Default Enhanced DCA")
+        self.assertEqual(plans[0].base_amount, Decimal("850.00000000"))
+        self.assertTrue(plans[0].is_default)
 
 
 if __name__ == "__main__":

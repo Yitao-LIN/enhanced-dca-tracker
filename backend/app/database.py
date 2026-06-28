@@ -77,7 +77,7 @@ def _needs_legacy_baseline_stamp() -> bool:
     app_tables = {
         "allocation_targets",
         "accounts",
-        "dca_settings",
+        "dca_plans",
         "import_sessions",
         "market_price_intraday",
         "market_price_history",

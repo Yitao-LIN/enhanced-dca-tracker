@@ -1,12 +1,29 @@
 """@file
-@brief Enhanced DCA recommendation rules.
+@brief DCA recommendation rules and allocation-split helpers.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-from app.domain import DcaRecommendation, quantize_money
+from app.domain import DcaAllocationSuggestion, DcaRecommendation, quantize_money
+
+
+def calculate_normal_dca(
+    base_amount: Decimal,
+    allocation_suggestions: list[DcaAllocationSuggestion] | None = None,
+) -> DcaRecommendation:
+    """@brief Return a fixed-contribution DCA recommendation without market adjustment."""
+    return DcaRecommendation(
+        base_amount=quantize_money(base_amount),
+        adjusted_amount=quantize_money(base_amount),
+        multiplier=Decimal("1.0"),
+        market_change_percent=Decimal("0"),
+        volatility_index=None,
+        reason="Keep contribution because this Normal DCA plan uses a fixed amount.",
+        model_type="normal",
+        allocation_suggestions=allocation_suggestions or [],
+    )
 
 
 def calculate_enhanced_dca(
@@ -15,6 +32,7 @@ def calculate_enhanced_dca(
     volatility_index: Decimal | None = None,
     min_multiplier: Decimal | None = None,
     max_multiplier: Decimal | None = None,
+    allocation_suggestions: list[DcaAllocationSuggestion] | None = None,
 ) -> DcaRecommendation:
     """@brief Adjust a base contribution amount from market drawdown/rally and volatility.
 
@@ -71,4 +89,40 @@ def calculate_enhanced_dca(
         market_change_percent=market_change_percent,
         volatility_index=volatility_index,
         reason=reason,
+        model_type="enhanced",
+        allocation_suggestions=allocation_suggestions or [],
     )
+
+
+def build_dca_allocation_suggestions(
+    total_amount: Decimal,
+    allocation_drift: list[object],
+) -> list[DcaAllocationSuggestion]:
+    """@brief Split a DCA amount across target tickers using allocation drift rows."""
+    target_rows = [row for row in allocation_drift if row.target_percent is not None and row.target_percent > 0]
+    if not target_rows:
+        return []
+
+    underweight_rows = [row for row in target_rows if row.buy_value > 0]
+    if underweight_rows:
+        total_weight = sum((row.buy_value for row in underweight_rows), Decimal("0"))
+        reason = "underweight target allocation"
+        weighted_rows = [(row, row.buy_value) for row in underweight_rows]
+    else:
+        total_weight = sum((row.target_percent for row in target_rows), Decimal("0"))
+        reason = "target allocation percent"
+        weighted_rows = [(row, row.target_percent) for row in target_rows]
+
+    if total_weight <= 0:
+        return []
+
+    return [
+        DcaAllocationSuggestion(
+            ticker=row.ticker,
+            suggested_amount=quantize_money(total_amount * weight / total_weight),
+            target_percent=row.target_percent,
+            current_percent=row.current_percent,
+            reason=reason,
+        )
+        for row, weight in weighted_rows
+    ]
